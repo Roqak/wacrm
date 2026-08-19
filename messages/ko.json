@@ -1518,6 +1518,12 @@
       "mirrorInboundDesc": "고객이 보낸 사진, 동영상, 음성 메모, 문서를 모두 복사해 저장합니다. Supabase 스토리지를 사용하며 16MB를 초과하는 파일은 건너뜁니다.",
       "mirrorInboundOffWarning": "새 첨부파일이 더 이상 복사되지 않으며, 도착 후 약 30일이 지나면 볼 수 없게 됩니다.",
       "mirrorInboundSaveFailed": "첨부파일 설정을 업데이트하지 못했습니다.",
+      "callingTitle": "음성 통화",
+      "callingDesc": "고객이 WhatsApp 번호로 전화를 걸면 해당 대화를 배정받은 상담원이 브라우저에서 받을 수 있습니다.",
+      "callingEnable": "수신 통화 받기",
+      "callingEnableDesc": "고객이 전화를 걸면 대시보드에 응답 패널이 표시됩니다. 상담원은 마이크 권한을 허용해야 합니다.",
+      "callingMetaReminder": "Meta WhatsApp Manager에서도 이 번호의 통화 기능을 켜고, 앱이 'calls' 웹훅 필드를 구독해야 합니다. 둘 중 하나라도 없으면 통화가 이 앱에 전달되지 않습니다.",
+      "callingSaveFailed": "통화 설정을 변경하지 못했습니다.",
       "saving": "저장 중...",
       "saveConfig": "설정 저장",
       "testing": "테스트 중...",
@@ -1750,5 +1756,17 @@
       "reindexTooltip": "모든 문서를 다시 임베딩합니다 (예: 임베딩 키 추가 후)",
       "loading": "불러오는 중…"
     }
+  },
+  "Calls": {
+    "incomingCall": "수신 중인 WhatsApp 통화",
+    "incomingFrom": "{name}님의 WhatsApp 통화 수신",
+    "unknownCaller": "알 수 없는 발신자",
+    "answer": "받기",
+    "decline": "거절",
+    "hangUp": "종료",
+    "mute": "음소거",
+    "unmute": "음소거 해제",
+    "connecting": "연결 중…",
+    "allowMic": "마이크 권한 허용…"
   }
 }

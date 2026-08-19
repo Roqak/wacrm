@@ -92,9 +92,39 @@ interface WhatsAppWebhookEntry {
         timestamp: string
         recipient_id: string
       }>
+      /** Voice-call signalling. Arrives on `field: 'calls'`. */
+      calls?: WhatsAppCallEvent[]
     }
     field: string
   }>
+}
+
+/**
+ * One entry in a `calls` webhook.
+ *
+ * `connect` carries Meta's SDP offer and starts the clock — Meta gives
+ * up on an unanswered call in well under a minute, so this handler does
+ * the least work it can before the row lands and Realtime wakes an
+ * agent. `terminate` closes the record out.
+ */
+interface WhatsAppCallEvent {
+  id: string
+  event: 'connect' | 'terminate' | string
+  /** Customer's number (wa_id) for an inbound call. */
+  from?: string
+  /** Our business number. */
+  to?: string
+  direction?: string
+  timestamp?: string
+  session?: {
+    sdp?: string
+    sdp_type?: string
+  }
+  /** Present on `terminate`. */
+  status?: string
+  start_time?: number
+  end_time?: number
+  duration?: number
 }
 
 // GET - Webhook verification
@@ -245,6 +275,16 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       }
 
       const value = change.value
+
+      // Voice calls. Their own change.field with a value shape that has
+      // no `messages`/`contacts`, so it has to be handled before the
+      // branches below bail out on those being absent.
+      if (change.field === 'calls' && value.calls) {
+        for (const call of value.calls) {
+          await handleCallEvent(call, value.metadata.phone_number_id)
+        }
+        continue
+      }
 
       // Handle status updates
       if (value.statuses) {
@@ -1241,4 +1281,172 @@ async function findOrCreateConversation(
   }
 
   return { conversation: newConv, created: true }
+}
+
+// ============================================================
+// Voice calls (inbound only — see migration 041)
+// ============================================================
+
+/**
+ * Resolve the account behind a `phone_number_id`, the same way the
+ * message path does. Split out because the calls branch needs it too
+ * and duplicating the multiple-rows diagnostics would guarantee the two
+ * copies drift.
+ */
+async function resolveConfigByPhoneNumberId(phoneNumberId: string) {
+  const { data: rows, error } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('*')
+    .eq('phone_number_id', phoneNumberId)
+
+  if (error) {
+    console.error('Error fetching whatsapp_config for phone_number_id:', phoneNumberId, error)
+    return null
+  }
+  if (!rows || rows.length === 0) {
+    console.error('No config found for phone_number_id:', phoneNumberId)
+    return null
+  }
+  if (rows.length > 1) {
+    console.error(
+      `Multiple configs (${rows.length}) found for phone_number_id:`,
+      phoneNumberId,
+      '— event dropped. Resolve duplicates so each number maps to a single account.',
+    )
+    return null
+  }
+  return rows[0]
+}
+
+/**
+ * Handle one `calls` webhook event.
+ *
+ * Like every other webhook path here, this owns its failures: Meta gets
+ * a 200 regardless, because a retry storm helps nobody and a dropped
+ * call event is not worth failing the delivery over.
+ */
+async function handleCallEvent(
+  call: WhatsAppCallEvent,
+  phoneNumberId: string,
+): Promise<void> {
+  try {
+    if (call.event === 'terminate') {
+      await handleCallTerminated(call)
+      return
+    }
+    if (call.event !== 'connect') {
+      // Meta may add events; recording an unknown one as a call would
+      // be worse than ignoring it.
+      console.warn('[calls] ignoring unknown call event:', call.event)
+      return
+    }
+
+    const config = await resolveConfigByPhoneNumberId(phoneNumberId)
+    if (!config) return
+
+    // Outbound calling is not implemented (and is unavailable on
+    // Nigerian, US, Canadian, Egyptian and Vietnamese numbers), so an
+    // event that isn't from a customer is not ours to record.
+    if (!call.from) {
+      console.error('[calls] connect event with no `from` — dropped:', call.id)
+      return
+    }
+
+    const contactOutcome = await findOrCreateContact(
+      config.account_id,
+      config.user_id,
+      call.from,
+      '',
+    )
+    if (!contactOutcome) return
+
+    const conversationOutcome = await findOrCreateConversation(
+      config.account_id,
+      config.user_id,
+      contactOutcome.contact.id,
+    )
+    if (!conversationOutcome) return
+
+    const conversation = conversationOutcome.conversation
+
+    // upsert on the unique wa_call_id: Meta redelivers webhooks, and a
+    // second `connect` for a call already ringing must not create a
+    // second row (nor re-ring an agent who is mid-answer).
+    const { error } = await supabaseAdmin()
+      .from('calls')
+      .upsert(
+        {
+          account_id: config.account_id,
+          conversation_id: conversation.id,
+          contact_id: contactOutcome.contact.id,
+          wa_call_id: call.id,
+          direction: 'inbound',
+          status: 'ringing',
+          // Snapshot the assignee: this call rang for whoever owned the
+          // thread at the moment it came in, even if it is reassigned
+          // while ringing.
+          assigned_agent_id: conversation.assigned_agent_id ?? null,
+          offer_sdp: call.session?.sdp ?? null,
+          started_at: new Date().toISOString(),
+        },
+        { onConflict: 'wa_call_id', ignoreDuplicates: true },
+      )
+
+    if (error) console.error('[calls] failed to record inbound call:', error)
+  } catch (err) {
+    console.error('[calls] handler error:', err)
+  }
+}
+
+/**
+ * Close out a call Meta says has ended.
+ *
+ * The status it lands in depends on how far it got: a call that never
+ * reached an agent is 'missed', anything that was picked up is
+ * 'completed'. We read the row first rather than trusting the webhook,
+ * because 'terminate' arrives for both cases and only our own record
+ * knows whether anyone answered.
+ */
+async function handleCallTerminated(call: WhatsAppCallEvent): Promise<void> {
+  const { data: existing } = await supabaseAdmin()
+    .from('calls')
+    .select('id, status, connected_at, started_at')
+    .eq('wa_call_id', call.id)
+    .maybeSingle()
+
+  if (!existing) {
+    // A terminate with no matching row means we never saw the connect
+    // (webhook downtime, or the row insert failed). Nothing to close.
+    console.warn('[calls] terminate for an unknown call:', call.id)
+    return
+  }
+
+  const answered =
+    existing.status === 'connected' || existing.connected_at !== null
+  const endedAt = new Date()
+  const startedFrom = existing.connected_at
+    ? new Date(existing.connected_at)
+    : null
+  const duration =
+    typeof call.duration === 'number'
+      ? call.duration
+      : startedFrom
+        ? Math.max(0, Math.round((endedAt.getTime() - startedFrom.getTime()) / 1000))
+        : 0
+
+  const { error } = await supabaseAdmin()
+    .from('calls')
+    .update({
+      status: answered ? 'completed' : existing.status === 'declined' ? 'declined' : 'missed',
+      ended_at: endedAt.toISOString(),
+      duration_seconds: duration,
+      end_reason: call.status ?? null,
+      // The offer is spent once the call is over, and it is the largest
+      // column on the row.
+      offer_sdp: null,
+      updated_at: endedAt.toISOString(),
+    })
+    .eq('id', existing.id)
+
+  if (error) console.error('[calls] failed to close call record:', error)
 }

@@ -87,7 +87,7 @@ export async function GET() {
 
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
-      .select('phone_number_id, access_token, status')
+      .select('phone_number_id, access_token, status, calling_enabled')
       .eq('account_id', accountId)
       .maybeSingle()
 
@@ -135,7 +135,14 @@ export async function GET() {
         phoneNumberId: config.phone_number_id,
         accessToken,
       })
-      return NextResponse.json({ connected: true, phone_info: phoneInfo })
+      return NextResponse.json({
+        connected: true,
+        phone_info: phoneInfo,
+        // Operator's own claim that calling is switched on at Meta —
+        // there is no Graph field that reports it, and a webhook that
+        // simply never arrives is not evidence either way.
+        calling_enabled: config.calling_enabled ?? false,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown Meta API error'
       console.error('[whatsapp/config GET] Meta API verification failed:', message)

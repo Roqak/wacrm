@@ -86,6 +86,8 @@ export function WhatsAppConfig() {
   // a viewer's toggle would match zero rows and appear to work.
   const [mirrorMedia, setMirrorMedia] = useState(true);
   const [savingMirror, setSavingMirror] = useState(false);
+  const [callingEnabled, setCallingEnabled] = useState(false);
+  const [savingCalling, setSavingCalling] = useState(false);
 
   // True once /register has succeeded on Meta's side (timestamp set
   // in the row). When false, the saved config is metadata-only and
@@ -162,6 +164,7 @@ export function WhatsAppConfig() {
 
           if (payload.connected) {
             setConnectionStatus('connected');
+            setCallingEnabled(Boolean(payload.calling_enabled));
             setResetReason(null);
             setStatusMessage('');
           } else {
@@ -223,6 +226,36 @@ export function WhatsAppConfig() {
       toast.error(t('mirrorInboundSaveFailed'));
     } finally {
       setSavingMirror(false);
+    }
+  }
+
+  async function handleToggleCalling(next: boolean) {
+    if (savingCalling) return;
+    // Optimistic, with the same revert-on-failure shape as the media
+    // toggle above. Unlike that one this goes through an API route
+    // rather than a direct table update, because the row is admin-only
+    // and the route is where that check lives.
+    const previous = callingEnabled;
+    setCallingEnabled(next);
+    setSavingCalling(true);
+    try {
+      const res = await fetch('/api/whatsapp/calling', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to update calling');
+      }
+    } catch (error) {
+      console.error('Failed to update calling setting:', error);
+      setCallingEnabled(previous);
+      toast.error(
+        error instanceof Error ? error.message : t('callingSaveFailed'),
+      );
+    } finally {
+      setSavingCalling(false);
     }
   }
 
@@ -758,6 +791,44 @@ export function WhatsAppConfig() {
                   onCheckedChange={handleToggleMirrorMedia}
                   disabled={savingMirror || !canEditSettings}
                   aria-label={t('mirrorInbound')}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Voice calling. Inbound only — business-initiated calls are
+            unavailable on numbers registered in Nigeria, the US, Canada,
+            Egypt and Vietnam, and rate-limited to roughly one call per
+            customer per day everywhere else. */}
+        {connectionStatus === 'connected' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-foreground">{t('callingTitle')}</CardTitle>
+              <CardDescription className="text-muted-foreground">
+                {t('callingDesc')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {t('callingEnable')}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('callingEnableDesc')}
+                  </p>
+                  {callingEnabled && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-500">
+                      {t('callingMetaReminder')}
+                    </p>
+                  )}
+                </div>
+                <Switch
+                  checked={callingEnabled}
+                  onCheckedChange={handleToggleCalling}
+                  disabled={savingCalling || !canEditSettings}
+                  aria-label={t('callingEnable')}
                 />
               </div>
             </CardContent>

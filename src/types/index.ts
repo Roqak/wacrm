@@ -68,6 +68,49 @@ export interface Account {
  * can_view_all_conversations) are populated only when the caller
  * has admin+ — agents and viewers see name + avatar + role only.
  */
+/**
+ * A voice call on a conversation (migration 041). Inbound only today —
+ * business-initiated calling is unavailable on numbers registered in
+ * Nigeria, the US, Canada, Egypt and Vietnam, and heavily rate-limited
+ * where it is available.
+ */
+export type CallStatus =
+  | 'ringing'
+  | 'connecting'
+  | 'connected'
+  | 'completed'
+  | 'missed'
+  | 'declined'
+  | 'failed'
+
+export interface Call {
+  id: string;
+  account_id: string;
+  conversation_id: string;
+  contact_id: string;
+  /** Meta's call id — the handle every Graph action is keyed on. */
+  wa_call_id: string;
+  direction: 'inbound' | 'outbound';
+  status: CallStatus;
+  /** Who the conversation was assigned to when the call arrived. */
+  assigned_agent_id?: string | null;
+  /** Who picked up. Null while ringing, and on calls nobody answered. */
+  answered_by?: string | null;
+  /**
+   * Meta's SDP offer. Present only while the call is being set up —
+   * cleared once media is live or the call ends, since it is the
+   * largest column on the row and useless afterwards.
+   */
+  offer_sdp?: string | null;
+  started_at: string;
+  connected_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  end_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AccountMember {
   user_id: string;
   full_name: string;
