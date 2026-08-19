@@ -12,13 +12,20 @@ and polish.
 ## [Unreleased]
 
 Per-member conversation visibility: an admin can now limit a teammate to
-the conversations assigned to them.
+the conversations assigned to them. Ollama joins OpenAI and Anthropic as
+an AI provider — including a server you run yourself, so conversations
+never leave your machine.
 
 > **Migration required:** apply `supabase/migrations/040_conversation_visibility.sql`
 > (adds `profiles.can_view_all_conversations`, defaulting to `true`, and
 > rewrites the `conversations` / `messages` / `message_reactions` RLS
 > policies to honour it). Existing members are unaffected until the
 > switch is turned off for them.
+>
+> **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
+> (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
+> `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
+> Existing OpenAI and Anthropic configs are untouched.
 
 ### Added
 
@@ -43,6 +50,35 @@ the conversations assigned to them.
   recorded sender and stay unlabelled, because there is nothing to
   recover them from. Sends through the public API are also unlabelled —
   an API key authenticates the account, not a person.
+
+- **Ollama, self-hosted.** Settings → AI Agents → Setup gains an
+  "Ollama (self-hosted)" provider with a server URL field. Point it at
+  your own Ollama — `http://localhost:11434`, or `http://ollama:11434`
+  under Docker Compose — and drafts, auto-replies and the Playground all
+  run locally on your hardware. No API key needed; none is asked for.
+
+- **Ollama Cloud.** The hosted service, as a normal bring-your-own-key
+  provider. Its endpoint is fixed in code and not editable per account.
+
+  Both speak the OpenAI chat-completions format, so one adapter now
+  serves all three providers.
+
+  > **Security — read before enabling a local Ollama.** A self-hosted
+  > server URL is set per account by any admin, and this app fetches it
+  > on every reply, which makes it a request-forgery sink. Private and
+  > loopback addresses are therefore **rejected by default**; set
+  > `AI_ALLOW_PRIVATE_BASE_URL=true` to allow them. Do that on a
+  > single-tenant install you run for your own team. On a deployment
+  > hosting accounts you do not control, leave it off — turning it on
+  > lets those admins point the agent at services on your internal
+  > network. Hosted providers ignore the stored URL entirely, so the
+  > flag has no bearing on them.
+
+  Semantic search in the knowledge base still needs an OpenAI embeddings
+  key: the stored vectors are 1536-dimensional (migration 030) and
+  re-embedding at another dimension is a schema change, not a setting.
+  An Ollama account can run chat entirely locally and leave that field
+  blank for keyword search.
 
 ### Fixed
 

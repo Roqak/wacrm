@@ -26,7 +26,11 @@ import {
 } from '@/components/ui/select';
 import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
-import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
+import {
+  AI_PROVIDER_DEFAULT_MODEL,
+  AI_PROVIDER_REQUIREMENTS,
+  OLLAMA_DEFAULT_BASE_URL,
+} from '@/lib/ai/defaults';
 import type { AiProvider } from '@/lib/ai/types';
 import type { AccountMember } from '@/types';
 import { fetchAccountMembers, memberLabel } from '@/lib/account/members';
@@ -41,11 +45,24 @@ const HANDOFF_QUEUE = '__queue__';
 const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic (Claude)',
+  ollama: 'Ollama (self-hosted)',
+  ollama_cloud: 'Ollama Cloud',
 };
+
+// Order the picker renders in. Hosted-and-familiar first, self-hosted
+// last — it is the option that needs an extra field and a server.
+const PROVIDER_ORDER: AiProvider[] = [
+  'openai',
+  'anthropic',
+  'ollama_cloud',
+  'ollama',
+];
 
 const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   openai: 'sk-...',
   anthropic: 'sk-ant-...',
+  ollama: '',
+  ollama_cloud: 'Your Ollama Cloud key',
 };
 
 export function AiConfig() {
@@ -62,9 +79,14 @@ export function AiConfig() {
   const [provider, setProvider] = useState<AiProvider>('openai');
   const [model, setModel] = useState(AI_PROVIDER_DEFAULT_MODEL.openai);
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState(OLLAMA_DEFAULT_BASE_URL);
   const [keyEdited, setKeyEdited] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [hasStoredKey, setHasStoredKey] = useState(false);
+  // Which provider the stored key was saved under. Needed because the
+  // picker can move ahead of what's on the server, and a key is only
+  // meaningful for the provider it was issued by.
+  const [savedProvider, setSavedProvider] = useState<AiProvider | null>(null);
   const [embeddingsKey, setEmbeddingsKey] = useState('');
   const [embeddingsKeyEdited, setEmbeddingsKeyEdited] = useState(false);
   const [hasStoredEmbeddingsKey, setHasStoredEmbeddingsKey] = useState(false);
@@ -94,7 +116,12 @@ export function AiConfig() {
       if (data.configured) {
         setConfigured(true);
         setProvider(data.provider);
+        setSavedProvider(data.provider);
         setModel(data.model);
+        // Only self-hosted providers store one; keep the pre-filled
+        // default visible for the others so switching to Ollama doesn't
+        // land on an empty required field.
+        setBaseUrl(data.base_url || OLLAMA_DEFAULT_BASE_URL);
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
@@ -128,12 +155,26 @@ export function AiConfig() {
   // typed a custom model.
   const handleProviderChange = (next: AiProvider) => {
     setProvider(next);
+    // Swap in the new provider's default model unless the admin typed
+    // their own. Checking against every provider's default (rather than
+    // the two that existed when this was written) is what keeps a
+    // second switch from stranding the first provider's model id.
     const isDefaultModel =
-      model === AI_PROVIDER_DEFAULT_MODEL.openai ||
-      model === AI_PROVIDER_DEFAULT_MODEL.anthropic ||
-      model.trim() === '';
+      model.trim() === '' ||
+      Object.values(AI_PROVIDER_DEFAULT_MODEL).includes(model);
     if (isDefaultModel) setModel(AI_PROVIDER_DEFAULT_MODEL[next]);
+    // Drop the masked placeholder when moving off the provider the key
+    // was saved under — leaving it there would show a key that will not
+    // be used, and the save would then fail on "api_key is required"
+    // with no visible reason.
+    if (next !== savedProvider && !keyEdited) setApiKey('');
   };
+
+  const requirements = AI_PROVIDER_REQUIREMENTS[provider];
+  // A stored key belongs to the provider it was saved under; the server
+  // refuses to reuse it for a different one, so the form must stop
+  // claiming there is a key once the admin switches away.
+  const storedKeyApplies = hasStoredKey && provider === savedProvider;
 
   const keyPayload = () => (keyEdited ? apiKey.trim() : undefined);
 
@@ -144,6 +185,7 @@ export function AiConfig() {
   const buildBody = () => ({
     provider,
     model: model.trim(),
+    base_url: requirements.requiresBaseUrl ? baseUrl.trim() : null,
     api_key: keyPayload(),
     embeddings_api_key: embeddingsKeyPayload(),
     system_prompt: systemPrompt.trim() || null,
@@ -163,6 +205,7 @@ export function AiConfig() {
           provider,
           model: model.trim(),
           api_key: keyPayload(),
+          base_url: requirements.requiresBaseUrl ? baseUrl.trim() : null,
         }),
       });
       const data = await res.json();
@@ -180,7 +223,11 @@ export function AiConfig() {
       toast.error(t('missingModel'));
       return;
     }
-    if (!configured && !keyEdited) {
+    if (requirements.requiresBaseUrl && !baseUrl.trim()) {
+      toast.error(t('missingBaseUrl'));
+      return;
+    }
+    if (requirements.requiresKey && !storedKeyApplies && !keyEdited) {
       toast.error(t('missingApiKey'));
       return;
     }
@@ -277,10 +324,11 @@ export function AiConfig() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="openai">{PROVIDER_LABEL.openai}</SelectItem>
-                    <SelectItem value="anthropic">
-                      {PROVIDER_LABEL.anthropic}
-                    </SelectItem>
+                    {PROVIDER_ORDER.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {PROVIDER_LABEL[p]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -297,8 +345,37 @@ export function AiConfig() {
               </div>
             </div>
 
+            {/* Server address — self-hosted providers only. Hosted
+                endpoints are fixed in code and deliberately not
+                editable: a "cloud" URL an account could change would
+                let it aim our server wherever it liked. */}
+            {requirements.requiresBaseUrl && (
+              <div className="space-y-2">
+                <Label htmlFor="ai-base-url">{t('baseUrl')}</Label>
+                <Input
+                  id="ai-base-url"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={OLLAMA_DEFAULT_BASE_URL}
+                  disabled={disabled}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('baseUrlHint')}
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label htmlFor="ai-key">{t('apiKey')}</Label>
+              <Label htmlFor="ai-key">
+                {t('apiKey')}
+                {!requirements.requiresKey && (
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    {t('apiKeyOptional')}
+                  </span>
+                )}
+              </Label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Input
@@ -310,7 +387,7 @@ export function AiConfig() {
                       setKeyEdited(true);
                     }}
                     onFocus={() => {
-                      if (!keyEdited && hasStoredKey) {
+                      if (!keyEdited && storedKeyApplies) {
                         setApiKey('');
                         setKeyEdited(true);
                       }

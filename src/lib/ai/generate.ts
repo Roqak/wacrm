@@ -8,6 +8,8 @@ import {
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
+import { generateOllama } from './providers/ollama'
+import { assertBaseUrlAllowed, resolveBaseUrl } from './providers/base-url'
 
 export interface GenerateArgs {
   config: AiConfig
@@ -41,6 +43,23 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     case 'anthropic':
       result = await generateAnthropic(providerArgs)
       break
+    case 'ollama':
+    case 'ollama_cloud': {
+      // Re-checked here, not just at save time. The stored address
+      // outlives the conditions it was accepted under: the operator can
+      // turn AI_ALLOW_PRIVATE_BASE_URL back off, and a hostname's
+      // resolution can change under a row that is never edited again.
+      const baseUrl = resolveBaseUrl(config.provider, config.baseUrl)!
+      if (config.provider === 'ollama') {
+        await assertBaseUrlAllowed(baseUrl)
+      }
+      result = await generateOllama({
+        ...providerArgs,
+        baseUrl,
+        cloud: config.provider === 'ollama_cloud',
+      })
+      break
+    }
     default:
       throw new AiError(`Unsupported AI provider: ${config.provider}`, {
         code: 'unsupported_provider',
