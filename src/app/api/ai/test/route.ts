@@ -4,6 +4,12 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { AiError, type AiProvider } from '@/lib/ai/types'
+import {
+  isAiProvider,
+  providerRequiresKey,
+  resolveBaseUrlInput,
+  supportedProvidersMessage,
+} from '@/lib/ai/provider-input'
 
 /**
  * POST /api/ai/test  (admin+)
@@ -26,16 +32,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
 
-    const provider = body.provider as AiProvider
-    if (provider !== 'openai' && provider !== 'anthropic') {
+    if (!isAiProvider(body.provider)) {
       return NextResponse.json(
-        { error: 'provider must be "openai" or "anthropic"' },
+        { error: supportedProvidersMessage() },
         { status: 400 },
       )
     }
+    const provider: AiProvider = body.provider
     const model = typeof body.model === 'string' ? body.model.trim() : ''
     if (!model) {
       return NextResponse.json({ error: 'model is required' }, { status: 400 })
+    }
+
+    // Test against the URL currently in the form, not the saved one —
+    // the whole point of the button is to check a change before saving
+    // it. Same policy check as the save path.
+    let baseUrl: string | null
+    try {
+      baseUrl = await resolveBaseUrlInput(provider, body.base_url)
+    } catch (err) {
+      if (err instanceof AiError) {
+        return NextResponse.json(
+          { error: err.message, code: err.code },
+          { status: err.status },
+        )
+      }
+      throw err
     }
 
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
@@ -43,22 +65,30 @@ export async function POST(request: Request) {
     if (!apiKeyPlain) {
       const { data: existing } = await supabase
         .from('ai_configs')
-        .select('api_key')
+        .select('api_key, provider')
         .eq('account_id', accountId)
         .maybeSingle()
-      if (!existing?.api_key) {
-        return NextResponse.json(
-          { error: 'Enter an API key to test.' },
-          { status: 400 },
-        )
-      }
-      try {
-        apiKeyPlain = decrypt(existing.api_key)
-      } catch {
-        return NextResponse.json(
-          { error: 'Stored API key could not be decrypted — re-enter your key.' },
-          { status: 400 },
-        )
+      // Only fall back to the stored key for the same provider — testing
+      // an Ollama endpoint must not quietly send the account's OpenAI
+      // key to it.
+      const storedKey =
+        existing?.api_key && existing.provider === provider ? existing.api_key : null
+      if (!storedKey) {
+        if (providerRequiresKey(provider)) {
+          return NextResponse.json(
+            { error: 'Enter an API key to test.' },
+            { status: 400 },
+          )
+        }
+      } else {
+        try {
+          apiKeyPlain = decrypt(storedKey)
+        } catch {
+          return NextResponse.json(
+            { error: 'Stored API key could not be decrypted — re-enter your key.' },
+            { status: 400 },
+          )
+        }
       }
     }
 
@@ -73,6 +103,7 @@ export async function POST(request: Request) {
         autoReplyMaxPerConversation: 3,
         handoffAgentId: null,
         embeddingsApiKey: null,
+        baseUrl,
       })
     } catch (err) {
       if (err instanceof AiError) {

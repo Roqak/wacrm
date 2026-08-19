@@ -68,6 +68,36 @@ BEGIN
       'conversations_select does not apply can_access_conversation — migration 040 did not rewrite the policy';
   END IF;
 
+  -- Ollama support (041). The CHECK widening is the load-bearing half:
+  -- without it a save is rejected by the database after the model call
+  -- has already been made and paid for.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ai_configs'
+      AND column_name = 'base_url'
+  ) THEN
+    RAISE EXCEPTION
+      'ai_configs.base_url is missing — migration 041 did not apply';
+  END IF;
+
+  BEGIN
+    INSERT INTO ai_configs (account_id, provider, model)
+    VALUES ('00000000-0000-0000-0000-000000000000', 'ollama', 'probe');
+    RAISE EXCEPTION
+      'inserting a config for a non-existent account succeeded — the account_id FK is missing';
+  EXCEPTION
+    WHEN foreign_key_violation THEN
+      NULL;  -- reached the FK, so the provider CHECK and the nullable
+             -- api_key both accepted the row. That is what we are testing.
+    WHEN check_violation THEN
+      RAISE EXCEPTION
+        'the ai_configs provider CHECK still rejects ''ollama'' — migration 041 did not widen it';
+    WHEN not_null_violation THEN
+      RAISE EXCEPTION
+        'ai_configs.api_key is still NOT NULL — migration 041 did not drop it';
+  END;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;

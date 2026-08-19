@@ -9,6 +9,12 @@ import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { embedTexts } from '@/lib/ai/embeddings'
 import { AiError, type AiProvider } from '@/lib/ai/types'
+import {
+  isAiProvider,
+  providerRequiresKey,
+  resolveBaseUrlInput,
+  supportedProvidersMessage,
+} from '@/lib/ai/provider-input'
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
@@ -30,7 +36,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key, base_url',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -77,12 +83,27 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null)
     if (!body || typeof body !== 'object') return bad('Invalid request body')
 
-    const provider = body.provider as AiProvider
-    if (provider !== 'openai' && provider !== 'anthropic') {
-      return bad('provider must be "openai" or "anthropic"')
-    }
+    if (!isAiProvider(body.provider)) return bad(supportedProvidersMessage())
+    const provider: AiProvider = body.provider
     const model = typeof body.model === 'string' ? body.model.trim() : ''
     if (!model) return bad('model is required')
+
+    // Where to reach a self-hosted server. Returns null for the hosted
+    // providers, which clears any address left behind by a previous
+    // provider choice. Throws a 400 AiError on a malformed URL or one
+    // the operator hasn't allowed — see `providers/base-url.ts`.
+    let baseUrl: string | null
+    try {
+      baseUrl = await resolveBaseUrlInput(provider, body.base_url)
+    } catch (err) {
+      if (err instanceof AiError) {
+        return NextResponse.json(
+          { error: err.message, code: err.code },
+          { status: err.status },
+        )
+      }
+      throw err
+    }
 
     const systemPrompt =
       typeof body.system_prompt === 'string' && body.system_prompt.trim()
@@ -125,23 +146,29 @@ export async function POST(request: Request) {
         : ''
     const clearEmbeddingsKey = body.embeddings_api_key === null
 
-    // Reuse the stored key when the form didn't send a fresh one.
     const { data: existing } = await supabase
       .from('ai_configs')
-      .select('id, provider, model, api_key')
+      .select('id, provider, model, api_key, base_url')
       .eq('account_id', accountId)
       .maybeSingle()
 
-    let apiKeyPlain: string
+    // Reuse the stored key when the form didn't send a fresh one, but
+    // only if it belongs to the same provider — carrying an OpenAI key
+    // over to an Ollama config would silently send it to whatever
+    // server the admin just pointed at.
+    const reusableStoredKey =
+      existing?.api_key && existing.provider === provider ? existing.api_key : null
+
+    let apiKeyPlain = ''
     if (rawKey) {
       apiKeyPlain = rawKey
-    } else if (existing?.api_key) {
+    } else if (reusableStoredKey) {
       try {
-        apiKeyPlain = decrypt(existing.api_key)
+        apiKeyPlain = decrypt(reusableStoredKey)
       } catch {
         return bad('Stored API key could not be decrypted — re-enter your key.')
       }
-    } else {
+    } else if (providerRequiresKey(provider)) {
       return bad('api_key is required')
     }
 
@@ -153,7 +180,8 @@ export async function POST(request: Request) {
       !existing ||
       rawKey !== '' ||
       provider !== existing.provider ||
-      model !== existing.model
+      model !== existing.model ||
+      baseUrl !== (existing.base_url ?? null)
 
     if (credentialsChanged) {
       try {
@@ -167,6 +195,7 @@ export async function POST(request: Request) {
           autoReplyMaxPerConversation: maxPer,
           handoffAgentId: null,
           embeddingsApiKey: null,
+          baseUrl,
         })
       } catch (err) {
         if (err instanceof AiError) {
@@ -198,9 +227,17 @@ export async function POST(request: Request) {
     }
 
     const encryptedKey = rawKey ? encrypt(rawKey) : null
+    // Switching providers without entering a new key must not leave the
+    // previous provider's key sitting in the row. It is unusable (we
+    // refuse to send it to a different provider above) but it is still a
+    // live secret on disk, and `has_key` would report the new config as
+    // credentialled when it isn't.
+    const clearStoredKey =
+      !rawKey && !!existing && existing.provider !== provider
     const shared: Record<string, unknown> = {
       provider,
       model,
+      base_url: baseUrl,
       system_prompt: systemPrompt,
       is_active: isActive,
       auto_reply_enabled: autoReplyEnabled,
@@ -216,9 +253,14 @@ export async function POST(request: Request) {
     }
 
     if (existing) {
+      const keyPatch = encryptedKey
+        ? { api_key: encryptedKey }
+        : clearStoredKey
+          ? { api_key: null }
+          : {}
       const { error: upErr } = await supabase
         .from('ai_configs')
-        .update(encryptedKey ? { ...shared, api_key: encryptedKey } : shared)
+        .update({ ...shared, ...keyPatch })
         .eq('account_id', accountId)
       if (upErr) {
         console.error('[ai/config POST] update error:', upErr)
@@ -231,7 +273,10 @@ export async function POST(request: Request) {
       const { error: insErr } = await supabase.from('ai_configs').insert({
         account_id: accountId,
         created_by: userId,
-        api_key: encryptedKey, // guaranteed non-null: rawKey required when no existing row
+        // Null is legitimate since migration 041 — a local Ollama has
+        // no credential. For every other provider the `api_key is
+        // required` check above has already run.
+        api_key: encryptedKey,
         ...shared,
       })
       if (insErr) {

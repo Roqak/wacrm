@@ -3,10 +3,18 @@
 //
 // One small provider-agnostic surface so the inbox draft route and the
 // inbound auto-reply bot both talk to `generateReply` without caring
-// whether the account is on OpenAI or Anthropic.
+// which provider the account is on.
 // ============================================================
 
-export type AiProvider = 'openai' | 'anthropic'
+/**
+ * `ollama` is an Ollama server the operator runs themselves; the
+ * account supplies its address. `ollama_cloud` is Ollama's hosted
+ * service, whose endpoint is fixed in code. They are separate members
+ * rather than one provider with a flag because everything downstream
+ * differs: whether a key is required, whether a base URL is editable,
+ * and whether the address is trusted.
+ */
+export type AiProvider = 'openai' | 'anthropic' | 'ollama' | 'ollama_cloud'
 
 /**
  * Account AI setup, decrypted and ready to use. Produced by
@@ -16,6 +24,8 @@ export type AiProvider = 'openai' | 'anthropic'
 export interface AiConfig {
   provider: AiProvider
   model: string
+  /** Empty string when the provider needs no credential — a local
+   *  Ollama typically has no authentication at all. */
   apiKey: string
   systemPrompt: string | null
   isActive: boolean
@@ -27,8 +37,19 @@ export interface AiConfig {
   handoffAgentId: string | null
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
-   *  null, retrieval falls back to lexical full-text search. */
+   *  null, retrieval falls back to lexical full-text search.
+   *
+   *  Still OpenAI-only, including for Ollama accounts: the stored
+   *  vectors are `vector(1536)` (migration 030) and re-embedding a
+   *  knowledge base at a different dimension is a schema change, not a
+   *  setting. An Ollama account can run chat locally and leave this
+   *  blank for lexical search. */
   embeddingsApiKey: string | null
+  /** Origin of a self-hosted server (`http://localhost:11434`), for
+   *  providers whose endpoint isn't fixed. Null for every hosted
+   *  provider — their addresses live in code and must never come from
+   *  the database. */
+  baseUrl: string | null
 }
 
 /** A single conversation turn in the shape both providers accept. */

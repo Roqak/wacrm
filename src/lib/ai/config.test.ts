@@ -27,6 +27,7 @@ const ROW = {
   auto_reply_enabled: false,
   auto_reply_max_per_conversation: 3,
   embeddings_api_key: null,
+  base_url: null,
 }
 
 describe('loadAiConfig requireActive', () => {
@@ -47,5 +48,26 @@ describe('loadAiConfig requireActive', () => {
     expect(
       await loadAiConfig(dbReturning(null), 'acct', { requireActive: false }),
     ).toBeNull()
+  })
+})
+
+describe('loadAiConfig key requirement', () => {
+  it('treats a keyless config as unconfigured for a provider that needs one', async () => {
+    const row = { ...ROW, is_active: true, api_key: null }
+    expect(await loadAiConfig(dbReturning(row), 'acct')).toBeNull()
+  })
+
+  it('loads a keyless Ollama config, since it has no credential to store', async () => {
+    const row = {
+      ...ROW,
+      is_active: true,
+      provider: 'ollama',
+      api_key: null,
+      base_url: 'http://localhost:11434',
+    }
+    const config = await loadAiConfig(dbReturning(row), 'acct')
+    expect(config).not.toBeNull()
+    expect(config!.apiKey).toBe('')
+    expect(config!.baseUrl).toBe('http://localhost:11434')
   })
 })

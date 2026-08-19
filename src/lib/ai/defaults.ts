@@ -13,6 +13,39 @@ import type { AiProvider } from './types'
 export const AI_PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
   openai: 'gpt-5.4-mini',
   anthropic: 'claude-haiku-4-5-20251001',
+  ollama: 'llama3.1:8b',
+  ollama_cloud: 'gpt-oss:120b',
+}
+
+/**
+ * Ollama's hosted API. Fixed in code, never read from the database:
+ * a "cloud" provider whose address an account could edit would be a
+ * self-service SSRF, since the server fetches it on every reply.
+ */
+export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com'
+
+/** Ollama's out-of-the-box listen address, pre-filled in the form. */
+export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434'
+
+/**
+ * What each provider needs from the setup form. Drives the API-route
+ * validation and the UI in one place, so the two can't disagree about
+ * whether a key is mandatory.
+ */
+export interface AiProviderRequirements {
+  /** A credential is mandatory — saving without one is rejected. */
+  requiresKey: boolean
+  /** The account supplies the server address. */
+  requiresBaseUrl: boolean
+}
+
+export const AI_PROVIDER_REQUIREMENTS: Record<AiProvider, AiProviderRequirements> = {
+  openai: { requiresKey: true, requiresBaseUrl: false },
+  anthropic: { requiresKey: true, requiresBaseUrl: false },
+  // A local Ollama has no auth by default. A key is still *accepted*
+  // (people put one behind a reverse proxy), it just isn't demanded.
+  ollama: { requiresKey: false, requiresBaseUrl: true },
+  ollama_cloud: { requiresKey: true, requiresBaseUrl: false },
 }
 
 /**

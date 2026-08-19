@@ -13,6 +13,7 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyMaxPerConversation: 3,
     handoffAgentId: null,
     embeddingsApiKey: null,
+    baseUrl: null,
     ...overrides,
   }
 }
@@ -67,6 +68,98 @@ describe('parseGeneration', () => {
       handoff: false,
       usage,
     })
+  })
+})
+
+describe('generateReply — Ollama', () => {
+  // These tests toggle the opt-in env var, so clear it after each one
+  // rather than leaking a permissive setting into the suites below.
+  afterEach(() => {
+    delete process.env.AI_ALLOW_PRIVATE_BASE_URL
+  })
+
+  const reply = () =>
+    okResponse({
+      choices: [{ message: { content: 'Local reply' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    })
+
+  it('calls the configured server and sends no auth header without a key', async () => {
+    process.env.AI_ALLOW_PRIVATE_BASE_URL = 'true'
+    const fetchMock = vi.fn().mockResolvedValue(reply())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await generateReply({
+      config: config({
+        provider: 'ollama',
+        apiKey: '',
+        baseUrl: 'http://localhost:11434',
+      }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hi' }],
+    })
+
+    expect(res.text).toBe('Local reply')
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:11434/v1/chat/completions')
+    // An empty Bearer is worse than none — some proxies read it as a
+    // failed auth attempt rather than an absent one.
+    expect(opts.headers.Authorization).toBeUndefined()
+  })
+
+  it('refuses a private server when the operator has not opted in', async () => {
+    delete process.env.AI_ALLOW_PRIVATE_BASE_URL
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      generateReply({
+        config: config({
+          provider: 'ollama',
+          apiKey: '',
+          baseUrl: 'http://localhost:11434',
+        }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'base_url_not_allowed' })
+    // Checked before the request, not after it.
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends Ollama Cloud to the fixed endpoint, ignoring any stored URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateReply({
+      config: config({
+        provider: 'ollama_cloud',
+        apiKey: 'ollama-key',
+        baseUrl: 'http://attacker.test',
+      }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hi' }],
+    })
+
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://ollama.com/v1/chat/completions')
+    expect(opts.headers.Authorization).toBe('Bearer ollama-key')
+  })
+
+  it('names Ollama in the error when the server rejects the call', async () => {
+    process.env.AI_ALLOW_PRIVATE_BASE_URL = 'true'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(errResponse(404, { error: 'model not found' })),
+    )
+
+    await expect(
+      generateReply({
+        config: config({ provider: 'ollama', apiKey: '', baseUrl: 'http://localhost:11434' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toThrowError(/Ollama/)
   })
 })
 
