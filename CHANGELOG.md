@@ -23,6 +23,10 @@ and logo instead of this one's.
 > policies to honour it). Existing members are unaffected until the
 > switch is turned off for them.
 >
+> **Migration required:** apply `supabase/migrations/044_ai_reply_suggestions.sql`
+> (adds `ai_configs.suggestions_enabled`, default off, and widens the
+> `ai_usage_log` mode CHECK). Nothing changes until an admin turns it on.
+>
 > **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
@@ -117,6 +121,24 @@ and logo instead of this one's.
   until you have clicked or typed somewhere on the page, so the first
   chime of a session waits for that; and the sound is generated rather
   than downloaded, so it works with the tab offline.
+
+- **Suggested replies in the inbox.** When a customer message is
+  waiting, the composer offers a few replies to pick from. Click one and
+  it lands in the box for you to edit before sending — nothing goes out
+  on its own. Admins turn it on under Settings → AI Agents → Behaviour;
+  it is off by default.
+
+  The difference from the ✨ draft button is who started it. A draft
+  costs a provider call because an agent asked for one. Suggestions cost
+  one because a customer wrote in, so they are opt-in for the same
+  reason the auto-reply bot is, and they are logged under their own
+  usage mode rather than folded into drafting — otherwise automatic
+  spend hides inside the figure for spend somebody chose.
+
+  They are asked for once per waiting message, not once per visit, so
+  switching between conversations re-reads what was already generated.
+  They stay quiet when you have started typing, when you sent the last
+  message, and once the 24-hour window closes.
 
 ### Fixed
 
