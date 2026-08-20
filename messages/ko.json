@@ -1623,6 +1623,11 @@
       "useMode": "{mode} 모드 사용",
       "active": "사용 중",
       "accentColor": "강조 색상",
+      "sound": "소리",
+      "messageSound": "새 메시지 알림음 재생",
+      "messageSoundDesc": "고객이 메시지를 보내면 앱 어디에 있든 알림음이 울립니다. 이 기기에만 적용됩니다.",
+      "playSample": "샘플 재생",
+      "soundGestureHint": "브라우저는 페이지와 상호작용하기 전까지 오디오를 차단하므로, 세션의 첫 알림음은 첫 클릭이나 키 입력 이후에 재생됩니다.",
       "useTheme": "{name} 테마 사용"
     },
     "branding": {

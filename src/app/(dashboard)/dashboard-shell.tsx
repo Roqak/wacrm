@@ -8,6 +8,7 @@ import { Header } from "@/components/layout/header";
 import { AccountAccessAlert } from "@/components/layout/account-access-alert";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { BrandTitle } from "@/components/layout/brand-title";
+import { MessageSound } from "@/components/notifications/message-sound";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -49,6 +50,9 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
       {/* Rewrites the tab-title suffix to the account's brand. Renders
           nothing. */}
       <BrandTitle />
+      {/* Chimes on inbound messages from anywhere in the app. Renders
+          nothing. */}
+      <MessageSound />
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />

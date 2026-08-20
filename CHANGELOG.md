@@ -102,6 +102,22 @@ and logo instead of this one's.
   and the API restricts it to http/https so an admin cannot put a
   script-bearing URL in front of their colleagues.
 
+- **A sound for new messages.** The dashboard now chimes when a
+  customer messages you, from anywhere in the app — not just the inbox.
+  Turn it on or off under Settings → Appearance, where there is also a
+  Play sample button so you can hear it before relying on it. It is a
+  per-device preference, not an account one.
+
+  It only fires for messages a customer sent: your own outbound
+  messages, AI auto-replies and flow sends stay silent. A burst of
+  messages chimes once rather than once each, and an agent restricted
+  to their own conversations is not chimed at by anyone else's.
+
+  Two things browsers impose that are worth knowing: audio is blocked
+  until you have clicked or typed somewhere on the page, so the first
+  chime of a session waits for that; and the sound is generated rather
+  than downloaded, so it works with the tab offline.
+
 ### Fixed
 
 - **Reply quotes credited the wrong person.** Quoting any outbound
