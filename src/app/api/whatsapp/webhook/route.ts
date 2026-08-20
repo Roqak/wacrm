@@ -1284,7 +1284,7 @@ async function findOrCreateConversation(
 }
 
 // ============================================================
-// Voice calls (inbound only — see migration 041)
+// Voice calls (inbound only — see migration 042)
 // ============================================================
 
 /**

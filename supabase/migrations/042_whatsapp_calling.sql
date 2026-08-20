@@ -1,5 +1,5 @@
 -- ============================================================
--- 041_whatsapp_calling.sql — inbound WhatsApp voice calls
+-- 042_whatsapp_calling.sql — inbound WhatsApp voice calls
 --
 -- Scope: customer-initiated calls only.
 --

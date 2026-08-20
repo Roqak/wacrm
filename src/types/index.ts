@@ -69,7 +69,7 @@ export interface Account {
  * has admin+ — agents and viewers see name + avatar + role only.
  */
 /**
- * A voice call on a conversation (migration 041). Inbound only today —
+ * A voice call on a conversation (migration 042). Inbound only today —
  * business-initiated calling is unavailable on numbers registered in
  * Nigeria, the US, Canada, Egypt and Vietnam, and heavily rate-limited
  * where it is available.

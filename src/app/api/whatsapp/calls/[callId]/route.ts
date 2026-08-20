@@ -74,7 +74,7 @@ export async function POST(
     }
 
     // Read the call through the caller's OWN client, so the RLS policy
-    // from migration 041 (which defers to conversation visibility) is
+    // from migration 042 (which defers to conversation visibility) is
     // what decides whether this call is theirs to touch. Everything
     // after this point uses the service-role client, and skipping this
     // step would hand any agent control of every call in the account.
