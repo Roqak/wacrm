@@ -14,7 +14,8 @@ and polish.
 Per-member conversation visibility: an admin can now limit a teammate to
 the conversations assigned to them. Ollama joins OpenAI and Anthropic as
 an AI provider — including a server you run yourself, so conversations
-never leave your machine.
+never leave your machine. Customers can now also call your WhatsApp
+number and reach an agent in the browser.
 
 > **Migration required:** apply `supabase/migrations/040_conversation_visibility.sql`
 > (adds `profiles.can_view_all_conversations`, defaulting to `true`, and
@@ -26,6 +27,10 @@ never leave your machine.
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
 > Existing OpenAI and Anthropic configs are untouched.
+>
+> **Migration required:** apply `supabase/migrations/042_whatsapp_calling.sql`
+> (adds the `calls` table with conversation-scoped RLS, puts it in the
+> Realtime publication, and adds `whatsapp_config.calling_enabled`).
 
 ### Added
 
@@ -79,6 +84,34 @@ never leave your machine.
   re-embedding at another dimension is a schema change, not a setting.
   An Ollama account can run chat entirely locally and leave that field
   blank for keyword search.
+
+- **Inbound WhatsApp voice calls.** A customer taps call in their chat;
+  the dashboard rings for whoever is assigned to that conversation, and
+  audio runs in the browser. Answer, decline, mute and hang up, with a
+  call record left on the conversation either way — including the ones
+  nobody picked up.
+
+  There is no media server: Meta sends an audio offer to the webhook,
+  the agent's browser answers it, and audio flows directly between the
+  two. This app only passes the offer and answer along.
+
+  Turn it on under Settings → WhatsApp → Voice calls. That switch only
+  controls this app — calling must also be enabled for the number in
+  Meta WhatsApp Manager, and the app must subscribe to the `calls`
+  webhook field. Meta additionally requires the number to be on Cloud
+  API with a messaging limit of at least 2,000 unique recipients a day.
+
+  Visibility follows the conversation: a member restricted to their own
+  threads is not rung by calls on anyone else's, and cannot see them in
+  history.
+
+  **Outbound calling is not included, and mostly cannot be.** Meta does
+  not offer business-initiated calls on numbers registered in Nigeria,
+  the United States, Canada, Egypt or Vietnam. Where it is offered it
+  needs a per-customer permission grant and is capped at one call per
+  day and two per week per customer, with permission revoked after four
+  unanswered calls. The `calls` table can represent an outbound row if
+  that changes.
 
 ### Fixed
 

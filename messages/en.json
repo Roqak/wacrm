@@ -1518,6 +1518,12 @@
       "mirrorInboundDesc": "Save a copy of every photo, video, voice note and document customers send. Uses your Supabase storage; files over 16 MB are skipped.",
       "mirrorInboundOffWarning": "New attachments will stop being copied and will become unavailable about 30 days after they arrive.",
       "mirrorInboundSaveFailed": "Could not update the attachment setting.",
+      "callingTitle": "Voice calls",
+      "callingDesc": "Customers can call your WhatsApp number and reach whoever is assigned to their conversation, in the browser.",
+      "callingEnable": "Accept incoming calls",
+      "callingEnableDesc": "Shows an answer panel in the dashboard when a customer calls. Agents need to allow microphone access.",
+      "callingMetaReminder": "Calling must also be switched on for this number in Meta WhatsApp Manager, and your app must subscribe to the 'calls' webhook field. Without both, no call ever reaches this app.",
+      "callingSaveFailed": "Could not update the calling setting.",
       "saving": "Saving...",
       "saveConfig": "Save Configuration",
       "testing": "Testing...",
@@ -1750,5 +1756,17 @@
       "reindexTooltip": "Re-embed all documents (e.g. after adding an embeddings key)",
       "loading": "Loading…"
     }
+  },
+  "Calls": {
+    "incomingCall": "Incoming WhatsApp call",
+    "incomingFrom": "Incoming WhatsApp call from {name}",
+    "unknownCaller": "Unknown caller",
+    "answer": "Answer",
+    "decline": "Decline",
+    "hangUp": "Hang up",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "connecting": "Connecting…",
+    "allowMic": "Allow microphone…"
   }
 }

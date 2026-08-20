@@ -98,6 +98,22 @@ BEGIN
         'ai_configs.api_key is still NOT NULL — migration 041 did not drop it';
   END;
 
+  -- Voice calling (042). The Realtime publication is the half worth
+  -- asserting: without it the table exists, the webhook writes to it,
+  -- and no agent's browser is ever told a call is ringing — a failure
+  -- that looks like "calls just don't work" with nothing in the logs.
+  IF to_regclass('public.calls') IS NULL THEN
+    RAISE EXCEPTION 'public.calls is missing — migration 042 did not apply';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'calls'
+  ) THEN
+    RAISE EXCEPTION
+      'the calls table is not in the supabase_realtime publication — inbound calls would never reach a browser';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
