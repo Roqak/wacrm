@@ -7,18 +7,21 @@ import { MODES, THEMES, type Mode, type ThemeId } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 import { useTranslations } from "next-intl";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { BrandingCard } from "./branding-card";
 
 /**
- * Appearance panel — light/dark mode + accent-color picker.
+ * Appearance panel — light/dark mode, accent colour, and branding.
  *
- * Two independent controls: a mode toggle (light / dark) and the
- * accent grid. Either applies + persists immediately. No save button:
- * each change is a single attribute swap on <html>, there's nothing
- * to roll back.
+ * The first two are device-scoped: a mode toggle (light / dark) and the
+ * accent grid, either of which applies + persists immediately. No save
+ * button, because each change is a single attribute swap on <html> and
+ * there's nothing to roll back. Persistence is localStorage only; the
+ * boot script in layout.tsx replays both choices before first paint on
+ * subsequent loads.
  *
- * Persistence: localStorage only (device-scoped). The boot script in
- * layout.tsx replays both choices before first paint on subsequent
- * loads.
+ * Branding is the odd one out and is treated differently on purpose:
+ * it's account-wide, admin-only, and every member sees the result, so
+ * it saves explicitly to the database rather than on each keystroke.
  */
 export function AppearancePanel() {
   const { theme, setTheme, mode, setMode } = useTheme();
@@ -73,6 +76,11 @@ export function AppearancePanel() {
           ))}
         </div>
       </div>
+
+      {/* Account-wide, admin-only, and saved explicitly — unlike the
+          two device-scoped controls above, which persist themselves to
+          localStorage the moment they're clicked. */}
+      <BrandingCard />
     </section>
   );
 }
