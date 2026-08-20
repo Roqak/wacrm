@@ -23,6 +23,12 @@ and logo instead of this one's.
 > policies to honour it). Existing members are unaffected until the
 > switch is turned off for them.
 >
+> **Migration required:** apply `supabase/migrations/045_multi_account_membership.sql`
+> (adds `account_members`, backfills it from existing profiles, and
+> rewrites `is_account_member` — the function every RLS policy in the
+> database depends on). Read the notes in that file before applying it
+> to production.
+>
 > **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
@@ -117,6 +123,27 @@ and logo instead of this one's.
   until you have clicked or typed somewhere on the page, so the first
   chime of a session waits for that; and the sound is generated rather
   than downloaded, so it works with the tab offline.
+
+- **One login, several businesses.** A person can now belong to more
+  than one account and switch between them from the sidebar. Each
+  business keeps its own WhatsApp number, contacts, pipelines, templates
+  and settings; agents shared across two businesses see one at a time,
+  never both at once.
+
+  Accepting an invitation used to move you: it reassigned your profile
+  to the inviter's account and deleted your own, which is why it refused
+  anyone whose account already held data. It now adds a membership and
+  switches you in, leaving your own business untouched — so that refusal
+  is gone with the data loss that caused it.
+
+  Being removed from a business no longer exiles you to a fresh account
+  unless it was your only one. Roles are per business: an admin of one
+  cannot change what you are in another.
+
+  Switching reloads the page. Everything in memory — cached lists, open
+  realtime channels — belongs to the business you are leaving, and the
+  database stops returning it the moment you switch, so a reload is the
+  honest way to get a clean slate.
 
 ### Fixed
 
