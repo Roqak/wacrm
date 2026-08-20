@@ -133,6 +133,11 @@
     }
   },
   "Inbox": {
+    "suggestions": {
+      "label": "Suggested replies",
+      "thinking": "Thinking of replies…",
+      "dismiss": "Hide suggestions"
+    },
     "page": {
       "whatsappNotConnected": "WhatsApp® is not connected. Go to Settings to connect your account."
     },
@@ -1724,6 +1729,8 @@
       "enableAssistantDesc": "Master switch. Turns on the “Draft with AI” button in the inbox.",
       "autoReply": "Auto-reply to inbound messages",
       "autoReplyDesc": "The bot answers new inbound messages automatically (only when no flow handles them and no agent is assigned). Hands off to a human when it can’t help.",
+      "suggestions": "Suggest replies in the inbox",
+      "suggestionsDesc": "When a customer message is waiting, offer agents a few replies to pick from and edit. Nothing is sent automatically. Uses your provider key each time a new message arrives.",
       "maxAutoReplies": "Max auto-replies per conversation",
       "maxAutoRepliesDesc": "After this many bot replies in one thread, the bot goes quiet.",
       "handoffTo": "Hand off to",

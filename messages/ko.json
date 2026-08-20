@@ -133,6 +133,11 @@
     }
   },
   "Inbox": {
+    "suggestions": {
+      "label": "추천 답장",
+      "thinking": "답장을 생각하는 중…",
+      "dismiss": "추천 숨기기"
+    },
     "page": {
       "whatsappNotConnected": "WhatsApp®이 연결되어 있지 않습니다. 설정으로 이동해 계정을 연결하세요."
     },
@@ -1724,6 +1729,8 @@
       "enableAssistantDesc": "마스터 스위치입니다. 인박스의 \"AI로 초안 작성\" 버튼을 켭니다.",
       "autoReply": "수신 메시지 자동 응답",
       "autoReplyDesc": "봇이 새 수신 메시지에 자동으로 응답합니다(플로우가 처리하지 않고 담당 상담원이 없는 경우에만). 도움을 줄 수 없으면 사람에게 인계합니다.",
+      "suggestions": "인박스에서 답장 제안",
+      "suggestionsDesc": "고객 메시지가 대기 중일 때 상담원이 고르고 수정할 수 있는 답장을 몇 개 제안합니다. 자동으로 전송되지는 않습니다. 새 메시지가 올 때마다 회원님의 제공자 키를 사용합니다.",
       "maxAutoReplies": "대화당 최대 자동 응답 횟수",
       "maxAutoRepliesDesc": "한 대화에서 이 횟수만큼 봇이 응답하면 더 이상 응답하지 않습니다.",
       "handoffTo": "인계 대상",
