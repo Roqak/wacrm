@@ -1623,6 +1623,11 @@
       "useMode": "Use {mode} mode",
       "active": "Active",
       "accentColor": "Accent color",
+      "sound": "Sound",
+      "messageSound": "Play a sound for new messages",
+      "messageSoundDesc": "Chimes when a customer messages you, anywhere in the app. This device only.",
+      "playSample": "Play sample",
+      "soundGestureHint": "Browsers block audio until you have interacted with the page, so the first chime of a session only plays after your first click or keypress.",
       "useTheme": "Use {name} theme"
     },
     "branding": {
