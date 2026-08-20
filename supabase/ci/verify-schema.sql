@@ -111,6 +111,27 @@ BEGIN
     RAISE EXCEPTION 'accounts.brand_name is missing — migration 043 did not apply';
   END IF;
 
+  -- Multi-business membership (045). The backfill is the half that
+  -- fails silently: the table can exist and be empty, in which case
+  -- is_account_member returns false for everyone and the entire app
+  -- goes dark rather than erroring.
+  IF to_regclass('public.account_members') IS NULL THEN
+    RAISE EXCEPTION 'public.account_members is missing — migration 045 did not apply';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM profiles p
+    WHERE p.account_id IS NOT NULL
+      AND p.account_role IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM account_members m
+        WHERE m.user_id = p.user_id AND m.account_id = p.account_id
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'a profile with an account has no matching account_members row — migration 045 backfill did not run';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;

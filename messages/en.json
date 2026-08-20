@@ -15,6 +15,11 @@
     "createAccount": "Create account"
   },
   "Sidebar": {
+    "accountSwitcher": {
+      "label": "Your businesses",
+      "selectAccount": "Select a business",
+      "switchFailed": "Could not switch business."
+    },
     "title": "CRM Template for WhatsApp",
     "dashboard": "Dashboard",
     "inbox": "Inbox",

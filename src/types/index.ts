@@ -68,6 +68,20 @@ export interface Account {
  * can_view_all_conversations) are populated only when the caller
  * has admin+ — agents and viewers see name + avatar + role only.
  */
+/**
+ * One business the signed-in user belongs to (migration 045). Feeds the
+ * account switcher; `is_active` marks the one whose data is currently
+ * readable — membership alone does not grant access, being switched in
+ * does.
+ */
+export interface AccountMembership {
+  account_id: string;
+  /** Branded name when the business set one, else the account name. */
+  name: string;
+  role: AccountRole;
+  is_active: boolean;
+}
+
 export interface AccountMember {
   user_id: string;
   full_name: string;
