@@ -1625,6 +1625,20 @@
       "accentColor": "Accent color",
       "useTheme": "Use {name} theme"
     },
+    "branding": {
+      "title": "Branding",
+      "description": "Replace the product name and mark shown to everyone in this account. Leave the name blank to use the built-in one, which follows each person's language.",
+      "nameLabel": "Product name",
+      "nameHint": "Shown in the sidebar and the browser tab.",
+      "logoLabel": "Logo URL",
+      "logoHint": "A square image works best. Must start with http:// or https://. Leave blank for the built-in mark.",
+      "preview": "Preview",
+      "logoBroken": "That image could not be loaded — check the URL is public and points directly at an image file.",
+      "save": "Save branding",
+      "saveSuccess": "Branding updated",
+      "saveFailed": "Could not save branding.",
+      "adminOnly": "Only admins and owners can change branding."
+    },
     "security": {
       "title": "Login & security",
       "description": "Change your password and sign out of your devices. These keep your account safe."

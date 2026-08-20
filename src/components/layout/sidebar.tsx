@@ -112,6 +112,7 @@ interface SidebarProps {
 }
 
 import { useTranslations } from "next-intl";
+import { displayBrandName } from "@/lib/branding";
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
@@ -188,11 +189,31 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <MessageSquare className="h-4 w-4" />
-            </div>
-            <span className="text-sm font-semibold text-foreground">
-              {t("title")}
+            {/* Operator's own mark when they've set one, the built-in
+                otherwise. `alt=""` because the product name sits right
+                beside it — announcing the logo too would read the same
+                thing twice to a screen reader.
+
+                Plain <img>, not next/image, and the lint warning that
+                comes with it is accepted: next/image fetches and
+                re-encodes remote images on the *server*, so pointing it
+                at a URL any account admin can set would hand them a
+                server-side fetch that a browser-only <img> does not
+                give. It would also need a wildcard remotePatterns
+                entry, since the host is whatever the operator typed. */}
+            {account?.brand_logo_url ? (
+              <img
+                src={account.brand_logo_url}
+                alt=""
+                className="h-8 w-8 shrink-0 rounded-lg object-contain"
+              />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <MessageSquare className="h-4 w-4" />
+              </div>
+            )}
+            <span className="truncate text-sm font-semibold text-foreground">
+              {displayBrandName(account?.brand_name, t("title"))}
             </span>
           </Link>
           <button

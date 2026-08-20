@@ -43,6 +43,16 @@ interface AccountSummary {
   /** Default deal currency (ISO-4217). NOT NULL DEFAULT 'USD' in the
    *  DB (migration 021); narrowed to DEFAULT_CURRENCY when absent. */
   default_currency: string;
+  /**
+   * Operator's own product name, replacing the shipped one in the
+   * sidebar and the browser tab (migration 043). Null means unbranded,
+   * which is deliberately distinct from "branded as the default": an
+   * unbranded install reads its name from the translation files and so
+   * follows the viewer's language, while a branded one is verbatim.
+   */
+  brand_name: string | null;
+  /** Logo shown in place of the built-in mark. Null = built-in. */
+  brand_logo_url: string | null;
 }
 
 /**
@@ -239,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .from("accounts")
             // default_currency added in migration 021; narrowed to the
             // USD fallback below for older schemas where it reads null.
-            .select("id, name, default_currency")
+            .select("id, name, default_currency, brand_name, brand_logo_url")
             .eq("id", data.account_id)
             .maybeSingle();
           if (accountErr) {
@@ -254,6 +264,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               id: account.id,
               name: account.name,
               default_currency: account.default_currency ?? DEFAULT_CURRENCY,
+              brand_name: account.brand_name ?? null,
+              brand_logo_url: account.brand_logo_url ?? null,
             };
           }
         }

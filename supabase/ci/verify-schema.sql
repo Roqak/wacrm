@@ -98,6 +98,19 @@ BEGIN
         'ai_configs.api_key is still NOT NULL — migration 041 did not drop it';
   END;
 
+  -- Branding (043). Both columns are nullable and purely additive, so
+  -- the only failure mode is the migration not running at all — which
+  -- would surface as the settings form erroring on a column that isn't
+  -- there.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'accounts'
+      AND column_name = 'brand_name'
+  ) THEN
+    RAISE EXCEPTION 'accounts.brand_name is missing — migration 043 did not apply';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;

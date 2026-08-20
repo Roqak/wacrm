@@ -14,7 +14,8 @@ and polish.
 Per-member conversation visibility: an admin can now limit a teammate to
 the conversations assigned to them. Ollama joins OpenAI and Anthropic as
 an AI provider — including a server you run yourself, so conversations
-never leave your machine.
+never leave your machine. And the product can now carry your own name
+and logo instead of this one's.
 
 > **Migration required:** apply `supabase/migrations/040_conversation_visibility.sql`
 > (adds `profiles.can_view_all_conversations`, defaulting to `true`, and
@@ -26,6 +27,10 @@ never leave your machine.
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
 > Existing OpenAI and Anthropic configs are untouched.
+>
+> **Migration required:** apply `supabase/migrations/043_account_branding.sql`
+> (adds nullable `brand_name` / `brand_logo_url` to `accounts`). Purely
+> additive — an account that sets neither looks exactly as before.
 
 ### Added
 
@@ -79,6 +84,23 @@ never leave your machine.
   re-embedding at another dimension is a schema change, not a setting.
   An Ollama account can run chat entirely locally and leave that field
   blank for keyword search.
+
+- **Branding.** Settings → Appearance gains a Branding section: set
+  your own product name and logo, and they replace the built-in ones in
+  the sidebar and the browser tab for everyone in the account. Admins
+  and owners only; everyone else sees the section read-only.
+
+  Leaving the name blank is not the same as typing the default into it.
+  Blank means "unbranded", and an unbranded install reads its name from
+  the translation files — so it still says the right thing in each
+  person's language. A name you set is used verbatim in every language,
+  which is what you want for a business name and not what you want for
+  a product description.
+
+  The logo is a URL rather than an upload, and is rendered in a plain
+  `<img>` the viewer's browser loads. Nothing on the server fetches it,
+  and the API restricts it to http/https so an admin cannot put a
+  script-bearing URL in front of their colleagues.
 
 ### Fixed
 

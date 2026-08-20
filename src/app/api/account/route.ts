@@ -2,7 +2,14 @@
 // /api/account
 //
 //   GET   — current caller's account + role. Any member.
-//   PATCH — rename the account.                  Admin+.
+//   PATCH — rename the account, and set its branding.  Admin+.
+//
+// Rename vs branding
+//   `name` is what the workspace is called — it shows up in invites and
+//   on the account switcher. `brand_name` is what the *product* is
+//   called, in the sidebar and the browser tab. An agency running this
+//   for a client wants those to be different things, so they are
+//   separate columns rather than one overloaded field.
 //
 // Why both verbs share a route file
 //   They speak about the same singular resource (the caller's
@@ -23,6 +30,10 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+import {
+  normalizeBrandLogoUrl,
+  normalizeBrandName,
+} from "@/lib/branding";
 
 export async function GET() {
   try {
@@ -53,27 +64,57 @@ export async function PATCH(request: Request) {
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as
-      | { name?: unknown }
+      | { name?: unknown; brand_name?: unknown; brand_logo_url?: unknown }
       | null;
-    const rawName = body?.name;
 
-    if (typeof rawName !== "string") {
-      return NextResponse.json(
-        { error: "'name' must be a string" },
-        { status: 400 },
-      );
+    // Every field is optional and applied only when present, so the
+    // rename form and the branding form can each PATCH just their own
+    // fields without wiping the other's.
+    const patch: Record<string, unknown> = {};
+
+    if (body && "name" in body) {
+      const rawName = body.name;
+      if (typeof rawName !== "string") {
+        return NextResponse.json(
+          { error: "'name' must be a string" },
+          { status: 400 },
+        );
+      }
+      const name = rawName.trim();
+      if (name.length === 0) {
+        return NextResponse.json(
+          { error: "Account name cannot be empty" },
+          { status: 400 },
+        );
+      }
+      if (name.length > MAX_NAME_LEN) {
+        return NextResponse.json(
+          { error: `Account name must be ${MAX_NAME_LEN} characters or fewer` },
+          { status: 400 },
+        );
+      }
+      patch.name = name;
     }
 
-    const name = rawName.trim();
-    if (name.length === 0) {
-      return NextResponse.json(
-        { error: "Account name cannot be empty" },
-        { status: 400 },
-      );
+    if (body && "brand_name" in body) {
+      const result = normalizeBrandName(body.brand_name);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error.message }, { status: 400 });
+      }
+      patch.brand_name = result.value;
     }
-    if (name.length > MAX_NAME_LEN) {
+
+    if (body && "brand_logo_url" in body) {
+      const result = normalizeBrandLogoUrl(body.brand_logo_url);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error.message }, { status: 400 });
+      }
+      patch.brand_logo_url = result.value;
+    }
+
+    if (Object.keys(patch).length === 0) {
       return NextResponse.json(
-        { error: `Account name must be ${MAX_NAME_LEN} characters or fewer` },
+        { error: "Provide 'name', 'brand_name' and/or 'brand_logo_url'" },
         { status: 400 },
       );
     }
@@ -83,9 +124,9 @@ export async function PATCH(request: Request) {
     // guaranteed the caller is admin+.
     const { data, error } = await ctx.supabase
       .from("accounts")
-      .update({ name })
+      .update(patch)
       .eq("id", ctx.accountId)
-      .select("id, name")
+      .select("id, name, brand_name, brand_logo_url")
       .single();
 
     if (error) {
