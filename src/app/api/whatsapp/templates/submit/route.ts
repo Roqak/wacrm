@@ -7,6 +7,7 @@ import {
 } from '@/lib/auth/account'
 import type { TemplatePayload } from '@/lib/whatsapp/template-validators'
 import {
+  dashboardHttpStatus,
   submitTemplate,
   TemplateLifecycleError,
 } from '@/lib/whatsapp/template-lifecycle'
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     if (error instanceof TemplateLifecycleError) {
       const body: Record<string, unknown> = { error: error.message }
       if (error.metaTemplateId) body.meta_template_id = error.metaTemplateId
-      return NextResponse.json(body, { status: error.httpStatus })
+      return NextResponse.json(body, { status: dashboardHttpStatus(error) })
     }
     console.error('Error submitting template:', error)
     return NextResponse.json(

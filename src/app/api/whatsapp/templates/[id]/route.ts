@@ -7,6 +7,7 @@ import {
 } from '@/lib/auth/account'
 import type { TemplatePayload } from '@/lib/whatsapp/template-validators'
 import {
+  dashboardHttpStatus,
   deleteTemplate,
   editTemplate,
   TemplateLifecycleError,
@@ -36,7 +37,7 @@ import {
 const lifecycleResponse = (error: TemplateLifecycleError) => {
   const body: Record<string, unknown> = { error: error.message }
   if (error.metaTemplateId) body.meta_template_id = error.metaTemplateId
-  return NextResponse.json(body, { status: error.httpStatus })
+  return NextResponse.json(body, { status: dashboardHttpStatus(error) })
 }
 
 export async function PATCH(

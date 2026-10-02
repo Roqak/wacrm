@@ -46,6 +46,22 @@ export class TemplateLifecycleError extends Error {
   }
 }
 
+/**
+ * The status a dashboard route should answer with for a lifecycle error.
+ *
+ * Cloudflare (in front of tunnel-hosted deploys) swaps any origin
+ * 502/504 body for its own HTML error page, so a 502 carrying Meta's
+ * rejection reached the browser as "Received a non-JSON template submit
+ * response (HTTP 502): <!DOCTYPE html>…" and the real reason was lost.
+ * 422 passes through untouched and still reads as "the request was
+ * understood but refused". The v1 API keeps 502 — it's documented.
+ */
+export function dashboardHttpStatus(error: TemplateLifecycleError): number {
+  return error.httpStatus === 502 || error.httpStatus === 504
+    ? 422
+    : error.httpStatus
+}
+
 /** Statuses Meta lets you edit — anything else (PENDING, DISABLED,
  *  terminal states) is refused with an actionable message. */
 const EDITABLE_STATUS: Record<string, true> = {
