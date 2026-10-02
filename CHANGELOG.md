@@ -186,6 +186,14 @@ and logo instead of this one's.
   every account-supplied one, so such a business's inbound traffic is
   accepted instead of bounced as an invalid signature. Secrets are
   encrypted at rest and never sent back to the browser.
+
+- **Templates over the public API.** `templates:manage` joins the API
+  key scopes: list / create (submit to Meta for approval) / read, edit-
+  and-resubmit, and delete move to `/api/v1/templates` — the same
+  lifecycle the dashboard drives, so scripts and external systems can
+  maintain the catalog without the UI. Body shape matches the
+  dashboard's template form; Meta's review still applies and statuses
+  (PENDING / APPROVED / REJECTED / PAUSED) are returned verbatim.
 - **Suggested replies in the inbox.** When a customer message is
   waiting, the composer offers a few replies to pick from. Click one and
   it lands in the box for you to edit before sending — nothing goes out
