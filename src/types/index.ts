@@ -103,6 +103,27 @@ export interface AccountMember {
 }
 
 /**
+ * One recorded inbound webhook event (migration 047), for the
+ * Settings → Webhook events panel. `account_id` is `null` exactly
+ * when Meta's traffic could not be matched to any WhatsApp connection
+ * in this deployment (unknown phone_number_id, duplicate config, or a
+ * foreign handshake) — those rows name Meta's numbers only and stream
+ * to admins of any account.
+ */
+export interface WebhookEventLog {
+  id: string;
+  account_id: string | null;
+  phone_number_id: string | null;
+  event_type: "message" | "status" | "template" | "verification" | "error";
+  status: "processed" | "ignored" | "dropped" | "error";
+  summary: string | null;
+  /** The raw Meta value body or error context. */
+  payload: unknown;
+  error: string | null;
+  created_at: string;
+}
+
+/**
  * Outstanding invite link row. `token_hash` is intentionally
  * absent — it lives only in the DB and on the server. The
  * plaintext token is returned once at creation time and surfaced

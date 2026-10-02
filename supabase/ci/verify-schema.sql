@@ -147,6 +147,27 @@ BEGIN
       'authenticated lacks EXECUTE on create_account — migration 046 grants did not apply';
   END IF;
 
+  -- Webhook event log (047). The table alone isn't enough: the panel's
+  -- live feed depends on the realtime publication, and that DO block is
+  -- IF NOT EXISTS-guarded — otherwise Meta traffic lands, the table
+  -- fills, and the panel still looks dead.
+  IF to_regclass('public.whatsapp_webhook_logs') IS NULL THEN
+    RAISE EXCEPTION
+      'public.whatsapp_webhook_logs is missing — migration 047 did not apply';
+  END IF;
+  IF to_regprocedure('public.is_account_admin_any()') IS NULL THEN
+    RAISE EXCEPTION
+      'public.is_account_admin_any() is missing — migration 047 did not apply';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND tablename = 'whatsapp_webhook_logs'
+  ) THEN
+    RAISE EXCEPTION
+      'whatsapp_webhook_logs is not in the supabase_realtime publication — migration 047 did not add it';
+  END IF;
+
   -- Reply suggestions (044). The widened usage-mode CHECK is the half
   -- that fails quietly: the tokens get bought and only the log INSERT
   -- is rejected, so the spend happens and nothing records it.

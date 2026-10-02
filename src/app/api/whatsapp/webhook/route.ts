@@ -35,6 +35,58 @@ function supabaseAdmin() {
   return _adminClient
 }
 
+// ============================================================
+// Webhook event logging (migration 047) — the evidence trail the
+// settings panel streams. One row per webhook change plus verification
+// attempts; the service-role client is the only writer because Meta
+// traffic has no user session.
+//
+// NEVER throws, and failures to record log to the console only: the
+// log table is the diagnostic, so a broken diagnostic must not be
+// able to take the webhook down with it.
+// ============================================================
+async function logWebhookEvent(event: {
+  account_id?: string | null
+  phone_number_id?: string | null
+  event_type: 'message' | 'status' | 'template' | 'verification' | 'error'
+  outcome: 'processed' | 'ignored' | 'dropped' | 'error'
+  summary?: string | null
+  payload?: unknown
+  error?: string | null
+}) {
+  const { error: insertError } = await supabaseAdmin()
+    .from('whatsapp_webhook_logs')
+    .insert({
+      account_id: event.account_id ?? null,
+      phone_number_id: event.phone_number_id ?? null,
+      event_type: event.event_type,
+      status: event.outcome,
+      summary: event.summary ?? null,
+      // Raw Meta body or a derived object; jsonb accepts both scalar
+      // and document values, and no caller passes a secret.
+      payload: event.payload === undefined ? null : event.payload,
+      error: event.error ?? null,
+    })
+  if (insertError) {
+    console.error('[webhook-log] failed to record event:', insertError)
+  }
+}
+
+/** Pulls the phone number id out of a change payload, if it has one —
+ *  used by the catch-all branch so errors still name the number. */
+function phoneNumberIdOfChange(change: unknown): string | null {
+  if (typeof change !== 'object' || change === null) return null
+  if (!('value' in change)) return null
+  const value = change.value
+  if (typeof value !== 'object' || value === null) return null
+  if (!('metadata' in value)) return null
+  const metadata = value.metadata
+  if (typeof metadata !== 'object' || metadata === null) return null
+  if (!('phone_number_id' in metadata)) return null
+  const candidate = metadata.phone_number_id
+  return typeof candidate === 'string' ? candidate : null
+}
+
 interface WhatsAppMessage {
   id: string
   from: string
@@ -115,7 +167,7 @@ export async function GET(request: Request) {
     // Fetch all whatsapp configs to check verify tokens
     const { data: configs, error: configError } = await supabaseAdmin()
       .from('whatsapp_config')
-      .select('id, verify_token')
+      .select('id, account_id, verify_token')
 
     if (configError || !configs) {
       console.error('Error fetching configs for verification:', configError)
@@ -143,6 +195,13 @@ export async function GET(request: Request) {
     }
 
     if (matchedConfig) {
+      // Record the handshake so the panel shows Meta configured us.
+      await logWebhookEvent({
+        account_id: matchedConfig.account_id,
+        event_type: 'verification',
+        outcome: 'processed',
+        summary: 'Webhook handshake succeeded (hub.challenge returned)',
+      })
       // Fire-and-forget GCM upgrade. Safe to run on every subscribe
       // since it's a no-op once the column is already GCM.
       if (isLegacyFormat(matchedConfig.verify_token)) {
@@ -166,6 +225,13 @@ export async function GET(request: Request) {
       })
     }
 
+    // Someone else's webhook pointed at our URL — worth seeing in the
+    // panel as dropped traffic with no account of ours behind it.
+    await logWebhookEvent({
+      event_type: 'verification',
+      outcome: 'dropped',
+      summary: 'Webhook handshake refused (verify token mismatch)',
+    })
     return NextResponse.json(
       { error: 'Verification token mismatch' },
       { status: 403 }
@@ -191,6 +257,12 @@ export async function POST(request: Request) {
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.
     console.warn('[webhook] rejected request with invalid signature')
+    void logWebhookEvent({
+      event_type: 'error',
+      outcome: 'dropped',
+      summary: 'Rejected request with an invalid X-Hub-Signature-256',
+      error: 'invalid-signature',
+    }).catch(() => null)
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -198,6 +270,11 @@ export async function POST(request: Request) {
   try {
     body = JSON.parse(rawBody)
   } catch {
+    void logWebhookEvent({
+      event_type: 'error',
+      outcome: 'dropped',
+      summary: 'Rejected request with malformed JSON',
+    }).catch(() => null)
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
@@ -231,95 +308,172 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
   for (const entry of body.entry) {
     for (const change of entry.changes) {
-      // Template-lifecycle events (status / quality / components
-      // updates from Meta) come in on a different change.field and
-      // have a different value shape — route them through the
-      // dedicated handler. Skip the messaging branches below so we
-      // don't try to read message-shaped fields off a template event.
-      if (isTemplateWebhookField(change.field)) {
-        await handleTemplateWebhookChange(
-          { field: change.field, value: change.value as unknown },
-          supabaseAdmin(),
-        )
-        continue
-      }
-
-      const value = change.value
-
-      // Handle status updates
-      if (value.statuses) {
-        for (const status of value.statuses) {
-          await handleStatusUpdate(status)
-        }
-      }
-
-      // Handle incoming messages
-      if (!value.messages || !value.contacts) continue
-
-      const phoneNumberId = value.metadata.phone_number_id
-
-      // Find user's config by phone_number_id. `.single()` returns
-      // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
-      // operators see the real cause in logs. ≥2 rows shouldn't happen
-      // post-migration 013 (UNIQUE constraint), but a row created
-      // before the constraint, or a race, would still surface here.
-      const { data: configRows, error: configError } = await supabaseAdmin()
-        .from('whatsapp_config')
-        .select('*')
-        .eq('phone_number_id', phoneNumberId)
-
-      if (configError) {
-        console.error(
-          'Error fetching whatsapp_config for phone_number_id:',
-          phoneNumberId,
-          configError
-        )
-        continue
-      }
-
-      if (!configRows || configRows.length === 0) {
-        console.error('No config found for phone_number_id:', phoneNumberId)
-        continue
-      }
-
-      if (configRows.length > 1) {
-        console.error(
-          `Multiple configs (${configRows.length}) found for phone_number_id:`,
-          phoneNumberId,
-          '— inbound message dropped. Resolve duplicates so each number maps to a single account.',
-          'Account owners:',
-          configRows.map((r: { account_id: string; user_id: string }) => `${r.account_id} (admin ${r.user_id})`)
-        )
-        continue
-      }
-
-      const config = configRows[0]
-
-      const decryptedAccessToken = decrypt(config.access_token)
-
-      for (let i = 0; i < value.messages.length; i++) {
-        const message = value.messages[i]
-        const contact = value.contacts[i] || value.contacts[0]
-
-        await processMessage(
-          message,
-          contact,
-          // Tenancy — drives every contact / conversation lookup
-          // and the engines' active-row dispatch.
-          config.account_id,
-          // Audit / sender-of-record — used as the user_id on row
-          // inserts that need it for NOT NULL FK compliance. Always
-          // the admin who saved the WhatsApp config.
-          config.user_id,
-          decryptedAccessToken,
-          // Default ON: the column is NOT NULL DEFAULT TRUE, but a row
-          // read before migration 039 lands would have it undefined,
-          // and losing attachments is the failure mode worth avoiding.
-          config.mirror_inbound_media !== false
-        )
+      // Every change is recorded for the settings panel (047), whatever
+      // the outcome — a row the panel shows is the contract, and the
+      // catch-all below must still record if a branch throws.
+      try {
+        await processChange(change)
+      } catch (error) {
+        console.error('Error processing webhook change:', error)
+        await logWebhookEvent({
+          phone_number_id: phoneNumberIdOfChange(change),
+          event_type: 'error',
+          outcome: 'error',
+          summary: `Change processing failed on field '${change?.field ?? 'unknown'}'`,
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
     }
   }
+
+  // Retention (047): prune events older than 7 days. One DELETE per
+  // webhook POST is cheap and keeps the log bounded without new
+  // infrastructure; a failure here is console-level noise only.
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const { error: pruneError } = await supabaseAdmin()
+    .from('whatsapp_webhook_logs')
+    .delete()
+    .lt('created_at', cutoff)
+  if (pruneError) {
+    console.warn('[webhook-log] prune failed:', pruneError)
+  }
+}
+
+async function processChange(change: WhatsAppWebhookEntry['changes'][number]) {
+  // Template-lifecycle events (status / quality / components
+  // updates from Meta) come in on a different change.field and
+  // have a different value shape — route them through the
+  // dedicated handler. Skip the messaging branches below so we
+  // don't try to read message-shaped fields off a template event.
+  if (isTemplateWebhookField(change.field)) {
+    await handleTemplateWebhookChange(
+      { field: change.field, value: change.value as unknown },
+      supabaseAdmin(),
+    )
+    await logWebhookEvent({
+      event_type: 'template',
+      outcome: 'processed',
+      summary: `Template event on field '${change.field}'`,
+      payload: change.value,
+    })
+    return
+  }
+
+  const value = change.value
+
+  // Handle status updates
+  if (value.statuses) {
+    for (const status of value.statuses) {
+      await handleStatusUpdate(status)
+    }
+    await logWebhookEvent({
+      phone_number_id: value.metadata?.phone_number_id ?? null,
+      event_type: 'status',
+      outcome: 'processed',
+      summary: `${value.statuses.length} delivery status update${
+        value.statuses.length === 1 ? '' : 's'
+      } (${value.statuses.map((s) => s.status).join(', ')})`,
+      payload: value,
+    })
+  }
+
+  // Handle incoming messages
+  if (!value.messages || !value.contacts) return
+
+  const phoneNumberId = value.metadata.phone_number_id
+
+  // Find user's config by phone_number_id. `.single()` returns
+  // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
+  // operators see the real cause in logs. ≥2 rows shouldn't happen
+  // post-migration 013 (UNIQUE constraint), but a row created
+  // before the constraint, or a race, would still surface here.
+  const { data: configRows, error: configError } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('*')
+    .eq('phone_number_id', phoneNumberId)
+
+  if (configError) {
+    console.error(
+      'Error fetching whatsapp_config for phone_number_id:',
+      phoneNumberId,
+      configError
+    )
+    await logWebhookEvent({
+      phone_number_id: phoneNumberId,
+      event_type: 'error',
+      outcome: 'error',
+      summary: 'Config lookup failed for an inbound message',
+      error: configError.message,
+    })
+    return
+  }
+
+  if (!configRows || configRows.length === 0) {
+    console.error('No config found for phone_number_id:', phoneNumberId)
+    await logWebhookEvent({
+      phone_number_id: phoneNumberId,
+      event_type: 'message',
+      outcome: 'dropped',
+      summary: `Inbound traffic has no matching WhatsApp connection (phone_number_id ${phoneNumberId})`,
+      payload: value,
+    })
+    return
+  }
+
+  if (configRows.length > 1) {
+    console.error(
+      `Multiple configs (${configRows.length}) found for phone_number_id:`,
+      phoneNumberId,
+      '— inbound message dropped. Resolve duplicates so each number maps to a single account.',
+      'Account owners:',
+      configRows.map((r: { account_id: string; user_id: string }) => `${r.account_id} (admin ${r.user_id})`)
+    )
+    await logWebhookEvent({
+      phone_number_id: phoneNumberId,
+      event_type: 'error',
+      outcome: 'error',
+      summary: `${configRows.length} WhatsApp connections claim phone_number_id ${phoneNumberId} — inbound dropped`,
+      payload: value,
+    })
+    return
+  }
+
+  const config = configRows[0]
+
+  const decryptedAccessToken = decrypt(config.access_token)
+
+  for (let i = 0; i < value.messages.length; i++) {
+    const message = value.messages[i]
+    const contact = value.contacts[i] || value.contacts[0]
+
+    await processMessage(
+      message,
+      contact,
+      // Tenancy — drives every contact / conversation lookup
+      // and the engines' active-row dispatch.
+      config.account_id,
+      // Audit / sender-of-record — used as the user_id on row
+      // inserts that need it for NOT NULL FK compliance. Always
+      // the admin who saved the WhatsApp config.
+      config.user_id,
+      decryptedAccessToken,
+      // Default ON: the column is NOT NULL DEFAULT TRUE, but a row
+      // read before migration 039 lands would have it undefined,
+      // and losing attachments is the failure mode worth avoiding.
+      config.mirror_inbound_media !== false
+    )
+  }
+
+  await logWebhookEvent({
+    account_id: config.account_id,
+    phone_number_id: phoneNumberId,
+    event_type: 'message',
+    outcome: 'processed',
+    summary: `${value.messages.length} inbound message${
+      value.messages.length === 1 ? '' : 's'
+    } received`,
+    payload: value,
+  })
 }
 
 // The happy-path status ladder — pending → sent → delivered → read →

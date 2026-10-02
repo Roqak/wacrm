@@ -1493,6 +1493,30 @@
       "owner": "Owner",
       "ownerHint": "Full control over account and billing"
     },
+    "webhookEvents": {
+      "title": "Webhook events",
+      "description": "What Meta sends your webhook callback URL, as it arrives — inbound messages, delivery statuses, handshakes, and what we dropped or failed to process.",
+      "loading": "Loading events…",
+      "empty": "No events recorded yet. When Meta posts to your webhook callback, the activity shows up here in real time.",
+      "live": "Live",
+      "connecting": "Connecting…",
+      "showing": "{count} shown",
+      "unlabeled": "(no summary)",
+      "loadFailed": "Could not load webhook events.",
+      "type": {
+        "message": "Message",
+        "status": "Status",
+        "template": "Template",
+        "verification": "Handshake",
+        "error": "Error"
+      },
+      "status": {
+        "processed": "Processed",
+        "ignored": "Ignored",
+        "dropped": "Dropped",
+        "error": "Failed"
+      }
+    },
     "whatsapp": {
       "title": "WhatsApp connection",
       "description": "Connect your Meta WhatsApp Business API. Credentials, webhook, and setup steps all live here.",
@@ -1571,6 +1595,7 @@
       "security": "Login & security",
       "appearance": "Appearance",
       "whatsapp": "WhatsApp",
+      "webhook-events": "Webhook events",
       "templates": "Templates",
       "quick-replies": "Quick replies",
       "fields": "Fields & tags",

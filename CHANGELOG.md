@@ -38,6 +38,13 @@ and logo instead of this one's.
 > calls). Purely additive — touch no existing row, and nothing changes
 > unless somebody starts a business.
 >
+> **Migration required:** apply `supabase/migrations/047_webhook_event_log.sql`
+> (adds the `whatsapp_webhook_logs` table the new Webhook events panel
+> streams, puts it in the realtime publication, and adds the
+> `is_account_admin_any()` helper its no-account policy uses). Rows
+> are written only by the webhook route; nothing changes until Meta
+> next posts to your callback.
+>
 > **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
@@ -157,6 +164,15 @@ and logo instead of this one's.
   Starting a business no longer requires an invitation: "New business"
   at the bottom of the sidebar names a business, creates it with you as
   its owner, and switches you into it. Existing businesses are untouched.
+
+- **Webhook events, live.** Settings → Webhook events streams what Meta
+  sends the webhook callback URL — inbound messages, delivery-status
+  updates, handshake attempts — plus everything the app dropped or
+  failed to process, with the raw payload a click away. Until now
+  those events were console lines a self-hoster could never read
+  (the empty-inbox failure in issue #301 was debugged print-statement
+  by print-statement). Admin-only; events older than 7 days are
+  pruned automatically.
 - **Suggested replies in the inbox.** When a customer message is
   waiting, the composer offers a few replies to pick from. Click one and
   it lands in the box for you to edit before sending — nothing goes out
