@@ -6,7 +6,10 @@ export interface LogAiUsageArgs {
   /** Null for a draft not tied to one thread, or when the row was
    *  deleted between generation and logging. */
   conversationId: string | null
-  mode: 'auto_reply' | 'draft'
+  /** Which surface spent the tokens. 'suggestions' is kept separate
+   *  from 'draft' because one is automatic and the other is a click —
+   *  folding them together hides the spend nobody asked for. */
+  mode: 'auto_reply' | 'draft' | 'suggestions'
   provider: AiProvider
   model: string
   /** Provider usage; a no-op when null (nothing worth recording). */

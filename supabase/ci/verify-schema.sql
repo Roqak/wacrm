@@ -131,6 +131,21 @@ BEGIN
     RAISE EXCEPTION
       'a profile with an account has no matching account_members row — migration 045 backfill did not run';
   END IF;
+  -- Reply suggestions (044). The widened usage-mode CHECK is the half
+  -- that fails quietly: the tokens get bought and only the log INSERT
+  -- is rejected, so the spend happens and nothing records it.
+  BEGIN
+    INSERT INTO ai_usage_log (account_id, mode, provider, model)
+    VALUES ('00000000-0000-0000-0000-000000000000', 'suggestions', 'openai', 'probe');
+    RAISE EXCEPTION
+      'inserting usage for a non-existent account succeeded — the account_id FK is missing';
+  EXCEPTION
+    WHEN foreign_key_violation THEN
+      NULL;  -- reached the FK, so the mode CHECK accepted 'suggestions'.
+    WHEN check_violation THEN
+      RAISE EXCEPTION
+        'ai_usage_log still rejects mode = ''suggestions'' — migration 044 did not widen the CHECK';
+  END;
 
   RAISE NOTICE 'schema verification passed';
 END

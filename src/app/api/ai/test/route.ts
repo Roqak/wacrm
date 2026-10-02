@@ -101,6 +101,7 @@ export async function POST(request: Request) {
         isActive: true,
         autoReplyEnabled: false,
         autoReplyMaxPerConversation: 3,
+        suggestionsEnabled: false,
         handoffAgentId: null,
         embeddingsApiKey: null,
         baseUrl,
