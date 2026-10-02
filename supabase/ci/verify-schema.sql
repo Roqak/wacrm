@@ -182,6 +182,28 @@ BEGIN
       'whatsapp_config.meta_app_secret is missing — migration 048 did not apply';
   END IF;
 
+  -- Template uniqueness per account (049). The wrong-key failure is
+  -- the loudest of them: the old per-user key + the new RLS meant a
+  -- member of two businesses could break the SECOND business's save
+  -- after Meta had already accepted it. Only the new key existing is
+  -- not proof — the legacy one must actually be gone (both IF NOT
+  -- EXISTS-guarded DDL would coexist silently).
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.message_templates'::regclass
+      AND conname = 'message_templates_account_name_language_key'
+  ) THEN
+    RAISE EXCEPTION
+      'message_templates_account_name_language_key is missing — migration 049 did not apply';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE indexname = 'message_templates_user_name_language_key'
+  ) THEN
+    RAISE EXCEPTION
+      'the legacy per-user template key still exists — migration 049 did not drop it';
+  END IF;
+
   -- Reply suggestions (044). The widened usage-mode CHECK is the half
   -- that fails quietly: the tokens get bought and only the log INSERT
   -- is rejected, so the spend happens and nothing records it.

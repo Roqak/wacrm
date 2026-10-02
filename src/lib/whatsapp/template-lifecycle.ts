@@ -141,14 +141,15 @@ async function upsertTemplateRow(
   supabase: SupabaseClient,
   row: TemplateUpsertRow,
 ) {
-  // TODO(account-sharing): conflict target is still scoped to
-  // user_id. Once a follow-up migration drops the legacy unique
-  // index on (user_id, name, language) and adds (account_id,
-  // name, language), switch `onConflict` here so two teammates
-  // can't shadow each other's same-named template.
+  // Uniqueness is per business (account_id, name, language) —
+  // migration 049 replaced 014's per-user key, which under 045's
+  // multi-membership model made one human's businesses collide into
+  // each other (the second insert tried to UPDATE the first
+  // business's row and the RLS using-clause refused it, after Meta
+  // had already accepted).
   return supabase
     .from('message_templates')
-    .upsert(row, { onConflict: 'user_id,name,language' })
+    .upsert(row, { onConflict: 'account_id,name,language' })
     .select()
     .single()
 }
