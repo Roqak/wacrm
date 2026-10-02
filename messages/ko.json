@@ -15,6 +15,20 @@
     "createAccount": "계정 만들기"
   },
   "Sidebar": {
+    "accountSwitcher": {
+      "label": "내 비즈니스",
+      "selectAccount": "비즈니스 선택",
+      "switchFailed": "비즈니스를 전환하지 못했습니다.",
+      "createBusiness": "새 비즈니스",
+      "createBusinessTitle": "새 비즈니스",
+      "createBusinessDescription": "비즈니스 이름을 정하세요. 만들면 바로 그 비즈니스로 전환됩니다.",
+      "businessName": "비즈니스 이름",
+      "businessNamePlaceholder": "예: 아크메무역",
+      "creating": "비즈니스 만드는 중…",
+      "createBusinessConfirm": "비즈니스 만들기",
+      "createFailed": "비즈니스를 만들지 못했습니다.",
+      "cancel": "취소"
+    },
     "title": "WhatsApp용 CRM 템플릿",
     "dashboard": "대시보드",
     "inbox": "인박스",
@@ -133,6 +147,11 @@
     }
   },
   "Inbox": {
+    "suggestions": {
+      "label": "추천 답장",
+      "thinking": "답장을 생각하는 중…",
+      "dismiss": "추천 숨기기"
+    },
     "page": {
       "whatsappNotConnected": "WhatsApp®이 연결되어 있지 않습니다. 설정으로 이동해 계정을 연결하세요."
     },
@@ -1474,6 +1493,30 @@
       "owner": "소유자",
       "ownerHint": "계정과 결제에 대한 전체 권한"
     },
+    "webhookEvents": {
+      "title": "웹훅 이벤트",
+      "description": "메타가 웹훅 콜백 URL로 보내는 내용을 도착하는 대로 보여줍니다 — 수신 메시지, 전달 상태, 핸드셰이크, 그리고 버려졌거나 실패한 항목.",
+      "loading": "이벤트 불러오는 중…",
+      "empty": "아직 기록된 이벤트가 없습니다. 메타가 웹훅 콜백으로 요청을 보내면 여기에 실시간으로 표시됩니다.",
+      "live": "실시간",
+      "connecting": "연결 중…",
+      "showing": "{count}개 표시",
+      "unlabeled": "(요약 없음)",
+      "loadFailed": "웹훅 이벤트를 불러오지 못했습니다.",
+      "type": {
+        "message": "메시지",
+        "status": "상태",
+        "template": "템플릿",
+        "verification": "핸드셰이크",
+        "error": "오류"
+      },
+      "status": {
+        "processed": "처리됨",
+        "ignored": "무시됨",
+        "dropped": "버려짐",
+        "error": "실패"
+      }
+    },
     "whatsapp": {
       "title": "WhatsApp 연결",
       "description": "Meta WhatsApp 비즈니스 API를 연결하세요. 자격 증명, 웹훅, 설정 단계가 모두 여기 있습니다.",
@@ -1505,6 +1548,9 @@
       "webhookVerifyToken": "웹훅 인증 토큰",
       "webhookVerifyTokenPlaceholder": "사용자 지정 인증 토큰을 만드세요",
       "webhookVerifyTokenHint": "직접 만드는 문자열입니다. Meta 웹훅 설정에 지정한 토큰과 일치해야 합니다.",
+      "appSecretLabel": "Meta 앱 시크릿",
+      "appSecretPlaceholder": "32자 16진수 문자열",
+      "appSecretHint": "이 번호가 이 배포의 Meta 앱이 아닌 다른 Meta 앱으로 전달될 때만 필요합니다. Meta는 웹훅 POST를 전달 앱의 시크릿으로 서명하므로, 해당 앱의 시크릿을 입력하면 이 번호의 수신 트래픽이 정상 처리됩니다. 비워두면 저장된 값을 유지합니다.",
       "twoStepPin": "2단계 인증 PIN",
       "optional": "(선택)",
       "pinPlaceholder": "Meta WhatsApp 관리자에서 발급받은 6자리 PIN",
@@ -1552,6 +1598,7 @@
       "security": "로그인 & 보안",
       "appearance": "화면 설정",
       "whatsapp": "WhatsApp",
+      "webhook-events": "웹훅 이벤트",
       "templates": "템플릿",
       "quick-replies": "빠른 답장",
       "fields": "필드 & 태그",
@@ -1724,6 +1771,8 @@
       "enableAssistantDesc": "마스터 스위치입니다. 인박스의 \"AI로 초안 작성\" 버튼을 켭니다.",
       "autoReply": "수신 메시지 자동 응답",
       "autoReplyDesc": "봇이 새 수신 메시지에 자동으로 응답합니다(플로우가 처리하지 않고 담당 상담원이 없는 경우에만). 도움을 줄 수 없으면 사람에게 인계합니다.",
+      "suggestions": "인박스에서 답장 제안",
+      "suggestionsDesc": "고객 메시지가 대기 중일 때 상담원이 고르고 수정할 수 있는 답장을 몇 개 제안합니다. 자동으로 전송되지는 않습니다. 새 메시지가 올 때마다 회원님의 제공자 키를 사용합니다.",
       "maxAutoReplies": "대화당 최대 자동 응답 횟수",
       "maxAutoRepliesDesc": "한 대화에서 이 횟수만큼 봇이 응답하면 더 이상 응답하지 않습니다.",
       "handoffTo": "인계 대상",

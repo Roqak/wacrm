@@ -79,6 +79,35 @@ describe('submitMessageTemplate', () => {
     ).rejects.toThrow(/Rate limit/);
   });
 
+  it('includes Meta\'s user-facing explanation behind "Invalid parameter"', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errorResponse(400, {
+        error: {
+          message: 'Invalid parameter',
+          code: 100,
+          error_subcode: 2388024,
+          error_user_title: 'Message template already exists',
+          error_user_msg:
+            'There is already English (US) content for this template.',
+        },
+      }),
+    );
+    await expect(
+      submitMessageTemplate({
+        wabaId: 'W',
+        accessToken: 't',
+        payload: {
+          name: 'n',
+          category: 'UTILITY',
+          language: 'en_US',
+          components: [],
+        },
+      }),
+    ).rejects.toThrow(
+      'Invalid parameter — Message template already exists: There is already English (US) content for this template. (subcode 2388024) (code 100)',
+    );
+  });
+
   it('throws if Meta accepts but returns no id (data integrity guard)', async () => {
     fetchMock.mockResolvedValueOnce(okResponse({ status: 'PENDING' }));
     await expect(

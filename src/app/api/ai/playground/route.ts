@@ -7,6 +7,7 @@ import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
 import { AiError, type ChatMessage } from '@/lib/ai/types'
+import { proxySafeStatus } from '@/lib/http/proxy-safe-status'
 
 // Keep the tested transcript bounded, mirroring the live context window.
 const MAX_TURNS = 20
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
     if (err instanceof AiError) {
       return NextResponse.json(
         { error: err.message, code: err.code },
-        { status: err.status },
+        { status: proxySafeStatus(err.status) },
       )
     }
     return toErrorResponse(err)

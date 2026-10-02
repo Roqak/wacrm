@@ -68,6 +68,20 @@ export interface Account {
  * can_view_all_conversations) are populated only when the caller
  * has admin+ — agents and viewers see name + avatar + role only.
  */
+/**
+ * One business the signed-in user belongs to (migration 045). Feeds the
+ * account switcher; `is_active` marks the one whose data is currently
+ * readable — membership alone does not grant access, being switched in
+ * does.
+ */
+export interface AccountMembership {
+  account_id: string;
+  /** Branded name when the business set one, else the account name. */
+  name: string;
+  role: AccountRole;
+  is_active: boolean;
+}
+
 export interface AccountMember {
   user_id: string;
   full_name: string;
@@ -86,6 +100,27 @@ export interface AccountMember {
    * rule as `email`.
    */
   can_view_all_conversations: boolean | null;
+}
+
+/**
+ * One recorded inbound webhook event (migration 047), for the
+ * Settings → Webhook events panel. `account_id` is `null` exactly
+ * when Meta's traffic could not be matched to any WhatsApp connection
+ * in this deployment (unknown phone_number_id, duplicate config, or a
+ * foreign handshake) — those rows name Meta's numbers only and stream
+ * to admins of any account.
+ */
+export interface WebhookEventLog {
+  id: string;
+  account_id: string | null;
+  phone_number_id: string | null;
+  event_type: "message" | "status" | "template" | "verification" | "error";
+  status: "processed" | "ignored" | "dropped" | "error";
+  summary: string | null;
+  /** The raw Meta value body or error context. */
+  payload: unknown;
+  error: string | null;
+  created_at: string;
 }
 
 /**

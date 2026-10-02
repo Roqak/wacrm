@@ -8,6 +8,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
+import { proxySafeStatus } from '@/lib/http/proxy-safe-status';
 
 /**
  * POST /api/whatsapp/react
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
       console.error('[whatsapp/react] Meta send failed:', message);
       return NextResponse.json(
         { error: `Meta API error: ${message}` },
-        { status: 502 },
+        { status: proxySafeStatus(502) },
       );
     }
 

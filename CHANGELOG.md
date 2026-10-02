@@ -23,6 +23,33 @@ and logo instead of this one's.
 > policies to honour it). Existing members are unaffected until the
 > switch is turned off for them.
 >
+> **Migration required:** apply `supabase/migrations/044_ai_reply_suggestions.sql`
+> (adds `ai_configs.suggestions_enabled`, default off, and widens the
+> `ai_usage_log` mode CHECK). Nothing changes until an admin turns it on.
+>
+> **Migration required:** apply `supabase/migrations/045_multi_account_membership.sql`
+> (adds `account_members`, backfills it from existing profiles, and
+> rewrites `is_account_member` — the function every RLS policy in the
+> database depends on). Read the notes in that file before applying it
+> to production.
+>
+> **Migration required:** apply `supabase/migrations/046_create_business.sql`
+> (adds the `create_account` RPC the sidebar's "New business" entry
+> calls). Purely additive — touch no existing row, and nothing changes
+> unless somebody starts a business.
+>
+> **Migration required:** apply `supabase/migrations/047_webhook_event_log.sql`
+> (adds the `whatsapp_webhook_logs` table the new Webhook events panel
+> streams, puts it in the realtime publication, and adds the
+> `is_account_admin_any()` helper its no-account policy uses). Rows
+> are written only by the webhook route; nothing changes until Meta
+> next posts to your callback.
+>
+> **Migration required:** apply `supabase/migrations/048_webhook_app_secret.sql`
+> (adds `whatsapp_config.meta_app_secret`, nullable). Existing configs
+> are untouched; the column is only read when a number is delivered by
+> a different Meta App.
+>
 > **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
@@ -117,6 +144,80 @@ and logo instead of this one's.
   until you have clicked or typed somewhere on the page, so the first
   chime of a session waits for that; and the sound is generated rather
   than downloaded, so it works with the tab offline.
+
+- **One login, several businesses.** A person can now belong to more
+  than one account and switch between them from the sidebar. Each
+  business keeps its own WhatsApp number, contacts, pipelines, templates
+  and settings; agents shared across two businesses see one at a time,
+  never both at once.
+
+  Accepting an invitation used to move you: it reassigned your profile
+  to the inviter's account and deleted your own, which is why it refused
+  anyone whose account already held data. It now adds a membership and
+  switches you in, leaving your own business untouched — so that refusal
+  is gone with the data loss that caused it.
+
+  Being removed from a business no longer exiles you to a fresh account
+  unless it was your only one. Roles are per business: an admin of one
+  cannot change what you are in another.
+
+  Switching reloads the page. Everything in memory — cached lists, open
+  realtime channels — belongs to the business you are leaving, and the
+  database stops returning it the moment you switch, so a reload is the
+  honest way to get a clean slate.
+
+  Starting a business no longer requires an invitation: "New business"
+  at the bottom of the sidebar names a business, creates it with you as
+  its owner, and switches you into it. Existing businesses are untouched.
+
+- **Webhook events, live.** Settings → Webhook events streams what Meta
+  sends the webhook callback URL — inbound messages, delivery-status
+  updates, handshake attempts — plus everything the app dropped or
+  failed to process, with the raw payload a click away. Until now
+  those events were console lines a self-hoster could never read
+  (the empty-inbox failure in issue #301 was debugged print-statement
+  by print-statement). Admin-only; events older than 7 days are
+  pruned automatically.
+
+- **Numbers served by other Meta apps.** A business whose WhatsApp
+  number is delivered by a Meta App other than this deployment's can
+  now set that app's secret (Settings → WhatsApp → Meta App Secret).
+  The webhook verifies each POST against the deployment secret and
+  every account-supplied one, so such a business's inbound traffic is
+  accepted instead of bounced as an invalid signature. Secrets are
+  encrypted at rest and never sent back to the browser.
+
+- **Templates over the public API.** `templates:manage` joins the API
+  key scopes: list / create (submit to Meta for approval) / read, edit-
+  and-resubmit, and delete move to `/api/v1/templates` — the same
+  lifecycle the dashboard drives, so scripts and external systems can
+  maintain the catalog without the UI. Body shape matches the
+  dashboard's template form; Meta's review still applies and statuses
+  (PENDING / APPROVED / REJECTED / PAUSED) are returned verbatim.
+
+- **Machine-readable API contract.** `GET /api/v1/openapi.json` serves
+  the whole API as an OpenAPI 3.1 document — scopes, pagination, the
+  response envelope, and per-endpoint schemas included — generated
+  from the same constants the routes use, with a test that fails if a
+  route ships undocumented. Give an integrator a key and that URL
+  and they need nothing else.
+- **Suggested replies in the inbox.** When a customer message is
+  waiting, the composer offers a few replies to pick from. Click one and
+  it lands in the box for you to edit before sending — nothing goes out
+  on its own. Admins turn it on under Settings → AI Agents → Behaviour;
+  it is off by default.
+
+  The difference from the ✨ draft button is who started it. A draft
+  costs a provider call because an agent asked for one. Suggestions cost
+  one because a customer wrote in, so they are opt-in for the same
+  reason the auto-reply bot is, and they are logged under their own
+  usage mode rather than folded into drafting — otherwise automatic
+  spend hides inside the figure for spend somebody chose.
+
+  They are asked for once per waiting message, not once per visit, so
+  switching between conversations re-reads what was already generated.
+  They stay quiet when you have started typing, when you sent the last
+  message, and once the 24-hour window closes.
 
 ### Fixed
 

@@ -1,5 +1,10 @@
 # Public API (`/api/v1`)
 
+> Machine-readable contract: **`GET /api/v1/openapi.json`** (OpenAPI 3.1,
+> no auth). This document is the prose mirror — when the two disagree,
+> one of them is a bug. Scopes in the spec are derived from the same
+> constants the routes use, so they cannot silently drift.
+
 The public API lets you drive your wacrm instance from your own
 scripts and automations — send messages, manage contacts, launch
 broadcasts — without going through the dashboard UI.
@@ -50,6 +55,7 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
+| `templates:manage`   | Create, update, and delete templates     |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -374,10 +380,57 @@ resolve to a public address — requests to `localhost`, private/RFC1918
 ranges, link-local (incl. cloud metadata `169.254.169.254`), and similar
 internal targets are refused at delivery time.
 
+## Templates
+
+Same lifecycle the dashboard's template manager drives: submit to Meta
+for approval, watch the status land, edit / re-submit, delete. All under
+scope `templates:manage`.
+
+A template body follows the dashboard's shape (see the New Template
+form): `name`, `category` (`Utility`/`Marketing` — AUTHENTICATION is
+refused with a pointer to Meta WhatsApp Manager), `language`
+(e.g. `en_US`), `body_text` with `{{1}}`-style variables, optional
+`footer_text`, optional header (`header_type`: `none` / `text` /
+`image` / `video` / `document` with `header_content` or
+`header_media_url`), optional `buttons` (URL / PHONE_NUMBER /
+QUICK_REPLY / COPY_CODE), and `sample_values` for the variables.
+
+- `GET /api/v1/templates` — list, paginated; `?search=` (name) and
+  `?status=` (one of Meta's status words, e.g. `APPROVED`) filters.
+- `POST /api/v1/templates` — create + submit. `201 { "data": { …"status":"PENDING" } }`.
+  A Meta rejection stores the row as DRAFT with the error and returns
+  `429` (Meta's 100-creates-per-hour rate limit) or `502` with the
+  actionable message.
+- `GET /api/v1/templates/{id}` — read one (status included).
+- `PATCH /api/v1/templates/{id}` — `APPROVED` / `REJECTED` / `PAUSED`
+  rows: full body replace, re-submitted to Meta, status → `PENDING`.
+- `DELETE /api/v1/templates/{id}` — deletes on Meta (by name + hsm_id
+  language variant) and drops the local row.
+
+Status lifecycle note: Meta review is asynchronous. `PENDING` may take
+hours to resolve; the dashboard's webhook panel will show the status
+webhook from Meta, and GET reflects it after that arrives. Template
+body text can't be changed without a re-review — that's Meta policy,
+not an implementation detail.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/templates \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "order_update",
+    "category": "Utility",
+    "language": "en_US",
+    "body_text": "Hi {{1}}! Your order {{2}} ships today.",
+    "sample_values": { "body": ["Jane", "A123"] }
+  }'
+# → 201 { "data": { "id": "…", "name": "order_update", "status": "PENDING", … } }
+```
+
 ## Roadmap
 
 The public API now covers messaging, contacts, conversations,
-broadcasts, and outbound webhooks — the full scope of
+broadcasts, outbound webhooks, and template management — see
 [#245](https://github.com/ArnasDon/wacrm/issues/245). Future ideas
-(deals/pipelines, templates, flows, a delivery queue for webhooks) are
+(deals/pipelines, flows, a delivery queue for webhooks) are
 not yet scheduled.

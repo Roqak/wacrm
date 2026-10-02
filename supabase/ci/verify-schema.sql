@@ -111,6 +111,115 @@ BEGIN
     RAISE EXCEPTION 'accounts.brand_name is missing — migration 043 did not apply';
   END IF;
 
+  -- Multi-business membership (045). The backfill is the half that
+  -- fails silently: the table can exist and be empty, in which case
+  -- is_account_member returns false for everyone and the entire app
+  -- goes dark rather than erroring.
+  IF to_regclass('public.account_members') IS NULL THEN
+    RAISE EXCEPTION 'public.account_members is missing — migration 045 did not apply';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM profiles p
+    WHERE p.account_id IS NOT NULL
+      AND p.account_role IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM account_members m
+        WHERE m.user_id = p.user_id AND m.account_id = p.account_id
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'a profile with an account has no matching account_members row — migration 045 backfill did not run';
+  END IF;
+
+  -- Create business (046). A function absent from the schema surfaces
+  -- as a loud API error, so the quiet half is the GRANT: EXECUTE revoked
+  -- for the browser role would turn the sidebar's create button into a
+  -- refusal for every single-business user on their first click.
+  IF to_regprocedure('public.create_account(text)') IS NULL THEN
+    RAISE EXCEPTION
+      'public.create_account(text) is missing — migration 046 did not apply';
+  END IF;
+  IF NOT has_function_privilege(
+    'authenticated', 'public.create_account(text)', 'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION
+      'authenticated lacks EXECUTE on create_account — migration 046 grants did not apply';
+  END IF;
+
+  -- Webhook event log (047). The table alone isn't enough: the panel's
+  -- live feed depends on the realtime publication, and that DO block is
+  -- IF NOT EXISTS-guarded — otherwise Meta traffic lands, the table
+  -- fills, and the panel still looks dead.
+  IF to_regclass('public.whatsapp_webhook_logs') IS NULL THEN
+    RAISE EXCEPTION
+      'public.whatsapp_webhook_logs is missing — migration 047 did not apply';
+  END IF;
+  IF to_regprocedure('public.is_account_admin_any()') IS NULL THEN
+    RAISE EXCEPTION
+      'public.is_account_admin_any() is missing — migration 047 did not apply';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND tablename = 'whatsapp_webhook_logs'
+  ) THEN
+    RAISE EXCEPTION
+      'whatsapp_webhook_logs is not in the supabase_realtime publication — migration 047 did not add it';
+  END IF;
+
+  -- Per-account Meta App Secret (048). The webhook route's signature
+  -- check reads this column; if it is missing, numbers connected
+  -- through a second Meta app fail HMAC verification again — the
+  -- exact drop the event panel exists to expose.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'whatsapp_config'
+      AND column_name = 'meta_app_secret'
+  ) THEN
+    RAISE EXCEPTION
+      'whatsapp_config.meta_app_secret is missing — migration 048 did not apply';
+  END IF;
+
+  -- Template uniqueness per account (049). The wrong-key failure is
+  -- the loudest of them: the old per-user key + the new RLS meant a
+  -- member of two businesses could break the SECOND business's save
+  -- after Meta had already accepted it. Only the new key existing is
+  -- not proof — the legacy one must actually be gone (both IF NOT
+  -- EXISTS-guarded DDL would coexist silently).
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.message_templates'::regclass
+      AND conname = 'message_templates_account_name_language_key'
+  ) THEN
+    RAISE EXCEPTION
+      'message_templates_account_name_language_key is missing — migration 049 did not apply';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE indexname = 'message_templates_user_name_language_key'
+  ) THEN
+    RAISE EXCEPTION
+      'the legacy per-user template key still exists — migration 049 did not drop it';
+  END IF;
+
+  -- Reply suggestions (044). The widened usage-mode CHECK is the half
+  -- that fails quietly: the tokens get bought and only the log INSERT
+  -- is rejected, so the spend happens and nothing records it.
+  BEGIN
+    INSERT INTO ai_usage_log (account_id, mode, provider, model)
+    VALUES ('00000000-0000-0000-0000-000000000000', 'suggestions', 'openai', 'probe');
+    RAISE EXCEPTION
+      'inserting usage for a non-existent account succeeded — the account_id FK is missing';
+  EXCEPTION
+    WHEN foreign_key_violation THEN
+      NULL;  -- reached the FK, so the mode CHECK accepted 'suggestions'.
+    WHEN check_violation THEN
+      RAISE EXCEPTION
+        'ai_usage_log still rejects mode = ''suggestions'' — migration 044 did not widen the CHECK';
+  END;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;

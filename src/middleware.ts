@@ -23,8 +23,6 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
-
   // getUser() transparently refreshes an expired access token, which
   // ROTATES the refresh token and writes the new cookies onto
   // `supabaseResponse` via setAll() above. Any response we return in
@@ -40,6 +38,21 @@ export async function middleware(request: NextRequest) {
       response.cookies.set(cookie)
     })
     return response
+  }
+
+  // A wedged session (stale / already-consumed refresh token) makes
+  // getUser() THROW, and an uncaught throw here would answer with
+  // Next's HTML error page — which is exactly what the template submit
+  // UI surfaced as "Unexpected token '<' … is not valid JSON": the
+  // browser POSTed JSON and got an error DOM back. Treat an
+  // unresolvable session as unauthenticated instead: API paths get the
+  // 401 JSON envelope, pages get the login redirect. The user recovers
+  // by signing in again — no cookie surgery required.
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user']
+  try {
+    ;({ data: { user } } = await supabase.auth.getUser())
+  } catch {
+    user = null
   }
 
   // Auth pages - redirect to dashboard if already logged in.

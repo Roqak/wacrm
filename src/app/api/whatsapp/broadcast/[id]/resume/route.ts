@@ -16,6 +16,7 @@
 
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
+import { proxySafeStatus } from '@/lib/http/proxy-safe-status';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import {
@@ -134,7 +135,7 @@ export async function POST(
     if (error instanceof BroadcastError) {
       return NextResponse.json(
         { error: error.message, code: error.code },
-        { status: error.status }
+        { status: proxySafeStatus(error.status) }
       );
     }
     console.error('Error in broadcast resume POST:', error);

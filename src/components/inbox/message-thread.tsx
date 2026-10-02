@@ -783,6 +783,18 @@ export function MessageThread({
   // account, so its length is the team size.
   const isSharedInbox = profiles.length > 1;
 
+  // The customer message AI suggestions should answer: the newest one,
+  // and only when nothing has been said since. If we replied last the
+  // agent is not waiting on anything, so there is nothing to suggest
+  // and no reason to spend a provider call finding that out.
+  const suggestFor = useMemo(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.sender_type !== "customer") return null;
+    // Optimistic rows never have a server id; there is nothing for the
+    // route to read yet either.
+    return last.id.startsWith("temp-") ? null : last.id;
+  }, [messages]);
+
   const contactDisplayName = contact?.name || contact?.phone || "Customer";
 
   // Display name of the member behind an outbound message, or null when
@@ -1241,6 +1253,7 @@ export function MessageThread({
       <MessageComposer
         conversationId={conversation.id}
         sessionExpired={sessionInfo.expired}
+        suggestFor={suggestFor}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}

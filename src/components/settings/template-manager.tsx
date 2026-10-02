@@ -91,6 +91,28 @@ const emptyForm: TemplateFormData = {
   buttons: [],
 };
 
+/**
+ * Parse a template fetch's response, and on non-JSON answers raise a
+ * diagnostic instead of the useless browser default. An HTML page here
+ * means the response never came from the API route (a wedged
+ * middleware — pre-41da02d — a proxy, or a WAF block page); the status
+ * plus first bytes usually name the culprit immediately, where
+ * "Unexpected token '<', '<!DOCTYPE'…" told nobody anything.
+ */
+async function readJsonOrDiagnose(
+  res: Response,
+  what: string
+): Promise<Record<string, unknown>> {
+  const raw = await res.text();
+  try {
+    return (JSON.parse(raw) ?? {}) as Record<string, unknown>;
+  } catch {
+    throw new Error(
+      `Received a non-JSON ${what} response (HTTP ${res.status}): ${raw.slice(0, 150) || '(empty)'}`,
+    );
+  }
+}
+
 const COMMON_LANGUAGE_CODES = [
   'en_US',
   'en_GB',
@@ -272,10 +294,16 @@ export function TemplateManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildSubmitPayload()),
       });
-      const data = await res.json();
+      const data = await readJsonOrDiagnose(
+        res,
+        isEdit ? 'template edit' : 'template submit',
+      );
       if (!res.ok) {
+        const message =
+          typeof data?.error === 'string' ? data.error : undefined;
         throw new Error(
-          data?.error || `${isEdit ? 'Edit' : 'Submit'} failed (HTTP ${res.status})`,
+          message ||
+            `${isEdit ? 'Edit' : 'Submit'} failed (HTTP ${res.status})`,
         );
       }
       // Refresh first, then close — re-opening the dialog
@@ -306,14 +334,20 @@ export function TemplateManager() {
     setSyncing(true);
     try {
       const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
-      const data = await res.json();
+      const data = await readJsonOrDiagnose(res, 'template sync');
       if (!res.ok) {
-        throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
+        const message =
+          typeof data?.error === 'string' ? data.error : undefined;
+        throw new Error(message || `Sync failed (HTTP ${res.status})`);
       }
+      // readJsonOrDiagnose types the payload loosely; the sync route
+      // always sends numbers here — coerce once at this boundary.
+      const inserted = Number(data.inserted);
+      const updated = Number(data.updated);
       toast.success(
-        t('toastSyncCount', { total: data.total }) +
-          (data.inserted || data.updated
-            ? t('toastSyncDetails', { inserted: data.inserted, updated: data.updated })
+        t('toastSyncCount', { total: Number(data.total) }) +
+          (inserted > 0 || updated > 0
+            ? t('toastSyncDetails', { inserted, updated })
             : ''),
       );
       if (Array.isArray(data.errors) && data.errors.length > 0) {
