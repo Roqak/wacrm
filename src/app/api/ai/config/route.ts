@@ -15,6 +15,7 @@ import {
   resolveBaseUrlInput,
   supportedProvidersMessage,
 } from '@/lib/ai/provider-input'
+import { proxySafeStatus } from '@/lib/http/proxy-safe-status'
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
       if (err instanceof AiError) {
         return NextResponse.json(
           { error: err.message, code: err.code },
-          { status: err.status },
+          { status: proxySafeStatus(err.status) },
         )
       }
       throw err

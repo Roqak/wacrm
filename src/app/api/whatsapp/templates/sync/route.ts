@@ -8,6 +8,7 @@ import {
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 import type { TemplateButton, TemplateSampleValues } from '@/types'
+import { proxySafeStatus } from '@/lib/http/proxy-safe-status'
 
 /**
  * Sync message templates from Meta → local message_templates table.
@@ -184,9 +185,10 @@ export async function POST() {
         } catch {
           // response wasn't JSON — keep the fallback
         }
-        // 422, not 502: Cloudflare replaces origin 502 bodies with its
-        // HTML error page, hiding Meta's message from the UI.
-        return NextResponse.json({ error: metaErr }, { status: 422 })
+        return NextResponse.json(
+          { error: metaErr },
+          { status: proxySafeStatus(502) },
+        )
       }
 
       const metaBody: {
