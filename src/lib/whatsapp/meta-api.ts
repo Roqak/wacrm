@@ -24,14 +24,33 @@ export interface MetaPhoneInfo {
 }
 
 interface MetaErrorResponse {
-  error?: { message?: string; code?: number; type?: string }
+  error?: {
+    message?: string;
+    code?: number;
+    type?: string;
+    /** Present on Graph API field-level rejections (e.g. "Invalid
+     *  parameter" templates carry the actionable text here:
+     *  "sample body text is not provided but is required"). */
+    error_data?: { details?: string };
+    error_subcode?: number;
+  }
 }
 
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
   try {
     const data = (await response.json()) as MetaErrorResponse
-    if (data.error?.message) message = data.error.message
+    const err = data.error
+    const parts: string[] = []
+    if (err?.message) parts.push(err.message)
+    // "Invalid parameter" alone tells the integrator nothing — Meta's
+    // field-level detail is the actual diagnosis ("sample body text is
+    // not provided…"). Include it, plus the subcode for error-report
+    // lookups.
+    if (err?.error_data?.details) parts.push(err.error_data.details)
+    if (parts.length > 0) message = parts.join(' — ')
+    if (err?.error_subcode) message += ` (subcode ${err.error_subcode})`
+    if (err?.code) message += ` (code ${err.code})`
   } catch {
     // response body wasn't JSON — keep the fallback
   }
