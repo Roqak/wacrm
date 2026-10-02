@@ -131,6 +131,22 @@ BEGIN
     RAISE EXCEPTION
       'a profile with an account has no matching account_members row — migration 045 backfill did not run';
   END IF;
+
+  -- Create business (046). A function absent from the schema surfaces
+  -- as a loud API error, so the quiet half is the GRANT: EXECUTE revoked
+  -- for the browser role would turn the sidebar's create button into a
+  -- refusal for every single-business user on their first click.
+  IF to_regprocedure('public.create_account(text)') IS NULL THEN
+    RAISE EXCEPTION
+      'public.create_account(text) is missing — migration 046 did not apply';
+  END IF;
+  IF NOT has_function_privilege(
+    'authenticated', 'public.create_account(text)', 'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION
+      'authenticated lacks EXECUTE on create_account — migration 046 grants did not apply';
+  END IF;
+
   -- Reply suggestions (044). The widened usage-mode CHECK is the half
   -- that fails quietly: the tokens get bought and only the log INSERT
   -- is rejected, so the spend happens and nothing records it.

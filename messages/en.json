@@ -18,7 +18,16 @@
     "accountSwitcher": {
       "label": "Your businesses",
       "selectAccount": "Select a business",
-      "switchFailed": "Could not switch business."
+      "switchFailed": "Could not switch business.",
+      "createBusiness": "New business",
+      "createBusinessTitle": "New business",
+      "createBusinessDescription": "Name the business. You will be switched into it right away.",
+      "businessName": "Business name",
+      "businessNamePlaceholder": "e.g. Acme Trading Co.",
+      "creating": "Creating business…",
+      "createBusinessConfirm": "Create business",
+      "createFailed": "Could not create the business.",
+      "cancel": "Cancel"
     },
     "title": "CRM Template for WhatsApp",
     "dashboard": "Dashboard",

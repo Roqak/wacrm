@@ -33,6 +33,11 @@ and logo instead of this one's.
 > database depends on). Read the notes in that file before applying it
 > to production.
 >
+> **Migration required:** apply `supabase/migrations/046_create_business.sql`
+> (adds the `create_account` RPC the sidebar's "New business" entry
+> calls). Purely additive — touch no existing row, and nothing changes
+> unless somebody starts a business.
+>
 > **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
@@ -148,6 +153,10 @@ and logo instead of this one's.
   realtime channels — belongs to the business you are leaving, and the
   database stops returning it the moment you switch, so a reload is the
   honest way to get a clean slate.
+
+  Starting a business no longer requires an invitation: "New business"
+  at the bottom of the sidebar names a business, creates it with you as
+  its owner, and switches you into it. Existing businesses are untouched.
 - **Suggested replies in the inbox.** When a customer message is
   waiting, the composer offers a few replies to pick from. Click one and
   it lands in the box for you to edit before sending — nothing goes out

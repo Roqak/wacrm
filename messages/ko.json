@@ -18,7 +18,16 @@
     "accountSwitcher": {
       "label": "내 비즈니스",
       "selectAccount": "비즈니스 선택",
-      "switchFailed": "비즈니스를 전환하지 못했습니다."
+      "switchFailed": "비즈니스를 전환하지 못했습니다.",
+      "createBusiness": "새 비즈니스",
+      "createBusinessTitle": "새 비즈니스",
+      "createBusinessDescription": "비즈니스 이름을 정하세요. 만들면 바로 그 비즈니스로 전환됩니다.",
+      "businessName": "비즈니스 이름",
+      "businessNamePlaceholder": "예: 아크메무역",
+      "creating": "비즈니스 만드는 중…",
+      "createBusinessConfirm": "비즈니스 만들기",
+      "createFailed": "비즈니스를 만들지 못했습니다.",
+      "cancel": "취소"
     },
     "title": "WhatsApp용 CRM 템플릿",
     "dashboard": "대시보드",
