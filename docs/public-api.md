@@ -1,5 +1,10 @@
 # Public API (`/api/v1`)
 
+> Machine-readable contract: **`GET /api/v1/openapi.json`** (OpenAPI 3.1,
+> no auth). This document is the prose mirror — when the two disagree,
+> one of them is a bug. Scopes in the spec are derived from the same
+> constants the routes use, so they cannot silently drift.
+
 The public API lets you drive your wacrm instance from your own
 scripts and automations — send messages, manage contacts, launch
 broadcasts — without going through the dashboard UI.

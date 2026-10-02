@@ -194,6 +194,13 @@ and logo instead of this one's.
   maintain the catalog without the UI. Body shape matches the
   dashboard's template form; Meta's review still applies and statuses
   (PENDING / APPROVED / REJECTED / PAUSED) are returned verbatim.
+
+- **Machine-readable API contract.** `GET /api/v1/openapi.json` serves
+  the whole API as an OpenAPI 3.1 document — scopes, pagination, the
+  response envelope, and per-endpoint schemas included — generated
+  from the same constants the routes use, with a test that fails if a
+  route ships undocumented. Give an integrator a key and that URL
+  and they need nothing else.
 - **Suggested replies in the inbox.** When a customer message is
   waiting, the composer offers a few replies to pick from. Click one and
   it lands in the box for you to edit before sending — nothing goes out
