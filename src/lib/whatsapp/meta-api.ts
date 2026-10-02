@@ -62,6 +62,11 @@ interface MetaErrorResponse {
      *  "sample body text is not provided but is required"). */
     error_data?: { details?: string };
     error_subcode?: number;
+    /** Human-readable explanation Meta attaches to many rejections —
+     *  e.g. subcode 2388024 says *why* "Invalid parameter" (a template
+     *  with this name and language already exists). */
+    error_user_title?: string;
+    error_user_msg?: string;
   }
 }
 
@@ -77,6 +82,13 @@ async function throwMetaError(response: Response, fallback: string): Promise<nev
     // not provided…"). Include it, plus the subcode for error-report
     // lookups.
     if (err?.error_data?.details) parts.push(err.error_data.details)
+    if (err?.error_user_msg) {
+      parts.push(
+        err.error_user_title
+          ? `${err.error_user_title}: ${err.error_user_msg}`
+          : err.error_user_msg,
+      )
+    }
     if (parts.length > 0) message = parts.join(' — ')
     if (err?.error_subcode) message += ` (subcode ${err.error_subcode})`
     if (err?.code) message += ` (code ${err.code})`
