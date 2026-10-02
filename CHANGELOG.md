@@ -45,6 +45,11 @@ and logo instead of this one's.
 > are written only by the webhook route; nothing changes until Meta
 > next posts to your callback.
 >
+> **Migration required:** apply `supabase/migrations/048_webhook_app_secret.sql`
+> (adds `whatsapp_config.meta_app_secret`, nullable). Existing configs
+> are untouched; the column is only read when a number is delivered by
+> a different Meta App.
+>
 > **Migration required:** apply `supabase/migrations/041_ollama_provider.sql`
 > (widens the `provider` CHECK on `ai_configs` and `ai_usage_log`, adds
 > `ai_configs.base_url`, and drops NOT NULL from `ai_configs.api_key`).
@@ -173,6 +178,14 @@ and logo instead of this one's.
   (the empty-inbox failure in issue #301 was debugged print-statement
   by print-statement). Admin-only; events older than 7 days are
   pruned automatically.
+
+- **Numbers served by other Meta apps.** A business whose WhatsApp
+  number is delivered by a Meta App other than this deployment's can
+  now set that app's secret (Settings → WhatsApp → Meta App Secret).
+  The webhook verifies each POST against the deployment secret and
+  every account-supplied one, so such a business's inbound traffic is
+  accepted instead of bounced as an invalid signature. Secrets are
+  encrypted at rest and never sent back to the browser.
 - **Suggested replies in the inbox.** When a customer message is
   waiting, the composer offers a few replies to pick from. Click one and
   it lands in the box for you to edit before sending — nothing goes out

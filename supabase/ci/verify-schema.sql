@@ -168,6 +168,20 @@ BEGIN
       'whatsapp_webhook_logs is not in the supabase_realtime publication — migration 047 did not add it';
   END IF;
 
+  -- Per-account Meta App Secret (048). The webhook route's signature
+  -- check reads this column; if it is missing, numbers connected
+  -- through a second Meta app fail HMAC verification again — the
+  -- exact drop the event panel exists to expose.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'whatsapp_config'
+      AND column_name = 'meta_app_secret'
+  ) THEN
+    RAISE EXCEPTION
+      'whatsapp_config.meta_app_secret is missing — migration 048 did not apply';
+  END IF;
+
   -- Reply suggestions (044). The widened usage-mode CHECK is the half
   -- that fails quietly: the tokens get bought and only the log INSERT
   -- is rejected, so the spend happens and nothing records it.

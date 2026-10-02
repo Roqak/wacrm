@@ -6,7 +6,7 @@ import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { reopenClosedConversation } from '@/lib/conversations/reopen'
-import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
+import { verifyWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
@@ -70,6 +70,36 @@ async function logWebhookEvent(event: {
   if (insertError) {
     console.error('[webhook-log] failed to record event:', insertError)
   }
+}
+
+// Secrets belong to the OTHER Meta apps this deployment serves
+// (migration 048): a business whose number is delivered by an app
+// other than the deployment's own carries its app secret on its
+// whatsapp_config row. Fetched fresh each POST — the table is tiny,
+// and secrets rotate through the settings UI, so nothing is cached.
+// Decrypt failures (wrong ENCRYPTION_KEY after a rotation) skip the
+// row rather than rejecting legit traffic from other secrets.
+async function collectAccountAppSecrets(): Promise<string[]> {
+  const { data, error } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('meta_app_secret')
+
+  if (error) {
+    console.error('[webhook] failed to load per-account app secrets:', error)
+    return []
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const secrets: string[] = []
+  for (const row of (data ?? []) as Array<{ meta_app_secret: string | null }>) {
+    if (!row?.meta_app_secret) continue
+    try {
+      secrets.push(decrypt(row.meta_app_secret))
+    } catch {
+      console.warn('[webhook] a meta_app_secret could not be decrypted — skipping it')
+    }
+  }
+  return secrets
 }
 
 /** Pulls the phone number id out of a change payload, if it has one —
@@ -252,7 +282,8 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
 
-  if (!verifyMetaWebhookSignature(rawBody, signature)) {
+  const accountSecrets = await collectAccountAppSecrets()
+  if (!verifyWebhookSignature(rawBody, signature, accountSecrets)) {
     // 401 (not 200) — we want Meta's delivery dashboard to show failures
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.

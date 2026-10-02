@@ -183,7 +183,7 @@ vi.mock('@/lib/contacts/dedupe', () => ({
   isUniqueViolation: () => false,
 }))
 vi.mock('@/lib/whatsapp/webhook-signature', () => ({
-  verifyMetaWebhookSignature: () => true,
+  verifyWebhookSignature: () => true,
 }))
 vi.mock('@/lib/whatsapp/template-webhook', () => ({
   isTemplateWebhookField: () => false,
