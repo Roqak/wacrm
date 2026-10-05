@@ -16,6 +16,7 @@
 
 import { NextResponse } from 'next/server';
 import type { RateLimitResult } from '@/lib/rate-limit';
+import { proxySafeStatus } from '@/lib/http/proxy-safe-status';
 
 export type ApiErrorCode =
   | 'unauthorized' // missing / malformed / unknown / revoked / expired key
@@ -102,7 +103,7 @@ export function okList<T>(items: T[], nextCursor: string | null): NextResponse {
  * send pipeline's `meta_error` / `whatsapp_not_configured`) — the
  * wire `code` is a free string, so any machine-meaningful value is
  * fine. `headers` is rarely needed; omit unless you have a
- * `Retry-After`-style set.
+ * `Retry-After`-style set. 502/504 go out as 422 (see proxySafeStatus).
  */
 export function fail(
   code: string,
@@ -110,7 +111,10 @@ export function fail(
   status: number,
   headers?: Record<string, string>
 ): NextResponse {
-  return NextResponse.json({ error: { code, message } }, { status, headers });
+  return NextResponse.json(
+    { error: { code, message } },
+    { status: proxySafeStatus(status), headers }
+  );
 }
 
 /**
@@ -122,7 +126,7 @@ export function toApiErrorResponse(err: unknown): NextResponse {
   if (err instanceof ApiError) {
     return NextResponse.json(
       { error: { code: err.code, message: err.message } },
-      { status: err.status, headers: err.headers }
+      { status: proxySafeStatus(err.status), headers: err.headers }
     );
   }
   console.error('[api/v1] uncategorized error:', err);

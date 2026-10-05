@@ -167,8 +167,8 @@ Response (201):
 ```
 
 Domain error codes beyond the table above: `whatsapp_not_configured`
-(400), `meta_error` (502 — the request reached Meta and it rejected the
-send), `template_malformed` (500).
+(400), `meta_error` (422 — the request reached Meta and it rejected the
+send; `message` carries Meta's reason), `template_malformed` (500).
 
 ### `GET /api/v1/contacts`
 
@@ -399,7 +399,7 @@ QUICK_REPLY / COPY_CODE), and `sample_values` for the variables.
   `?status=` (one of Meta's status words, e.g. `APPROVED`) filters.
 - `POST /api/v1/templates` — create + submit. `201 { "data": { …"status":"PENDING" } }`.
   A Meta rejection stores the row as DRAFT with the error and returns
-  `429` (Meta's 100-creates-per-hour rate limit) or `502` with the
+  `429` (Meta's 100-creates-per-hour rate limit) or `422` with the
   actionable message.
 - `GET /api/v1/templates/{id}` — read one (status included).
 - `PATCH /api/v1/templates/{id}` — `APPROVED` / `REJECTED` / `PAUSED`
