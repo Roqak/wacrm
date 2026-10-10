@@ -59,7 +59,12 @@ export async function POST(request: Request) {
           .slice(0, 50)
       : []
 
-    const config = await loadAiConfig(supabase, accountId).catch((err) => {
+    // requireActive:false, like the Playground: the master switch
+    // governs the assistant talking to CUSTOMERS (drafts, auto-reply).
+    // The form builder is an admin tool that only needs a working key.
+    const config = await loadAiConfig(supabase, accountId, {
+      requireActive: false,
+    }).catch((err) => {
       console.error('[flows/ai] loadAiConfig error:', err)
       throw new AiError('Stored API key could not be decrypted.', {
         code: 'key_decrypt_failed',
@@ -69,7 +74,8 @@ export async function POST(request: Request) {
     if (!config) {
       return NextResponse.json(
         {
-          error: 'AI is not set up. Add your provider key in Settings → AI Assistant.',
+          error:
+            'No AI provider configured. Add a provider and key in Settings → AI Assistant (the assistant itself can stay switched off).',
           code: 'ai_not_configured',
         },
         { status: 400 },
