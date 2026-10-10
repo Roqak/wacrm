@@ -200,6 +200,27 @@ async function meta<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Meta can accept a form's JSON and still refuse to publish it:
+ * publishing is gated by account-level integrity checks (the 139002
+ * family, "Integrity requirements not met."). The usual causes are
+ * business verification or the phone number's display name still in
+ * review, or a new number with little message history — not the form.
+ * Returns the explained error for that refusal, null otherwise.
+ */
+function publishRefusalError(err: unknown): FlowLifecycleError | null {
+  const metaText = err instanceof Error ? err.message : ''
+  if (!/integrity requirements not met/i.test(metaText)) return null
+  return new FlowLifecycleError(
+    `Meta refused to publish this form: ${metaText}. This is an account-level ` +
+      "check, not a problem with the form — usually business verification or the " +
+      "number's display name is still in review, or the number is new with little " +
+      'message history. The form stays here as a draft; retry Publish once Meta ' +
+      'clears the account, or contact WhatsApp support if it keeps refusing.',
+    502,
+  )
+}
+
 // ------------------------------------------------------------
 // Read / refresh
 // ------------------------------------------------------------
@@ -411,15 +432,10 @@ export async function createWaFlow(
       : validateFlowJson(input.flowJson)
 
   const { wabaId, accessToken } = await loadFlowConfig(db, input.accountId)
+  // Always a plain draft create — publishing happens below, in its own
+  // call, so a refused publish can't strand the form on Meta alone.
   const created = await meta(() =>
-    createFlow({
-      wabaId,
-      accessToken,
-      name,
-      categories,
-      flowJson,
-      publish: Boolean(input.publish && flowJson),
-    }),
+    createFlow({ wabaId, accessToken, name, categories, flowJson }),
   )
   const state = await meta(() => fetchMetaState(accessToken, created.id))
   const now = new Date().toISOString()
@@ -441,12 +457,31 @@ export async function createWaFlow(
       500,
     )
   }
-  return {
-    flow: data as unknown as WhatsAppFlow,
-    validation_errors: state.validation_errors.length
-      ? state.validation_errors
-      : created.validation_errors,
+  if (!input.publish) {
+    return {
+      flow: data as unknown as WhatsAppFlow,
+      validation_errors: state.validation_errors.length
+        ? state.validation_errors
+        : created.validation_errors,
+    }
   }
+
+  // Publish in a second call instead of Meta's combined create+publish:
+  // when the publish half fails (e.g. an integrity refusal) the form is
+  // already saved here as a draft instead of existing only on Meta.
+  try {
+    await meta(() => publishFlow({ flowId: created.id, accessToken }))
+  } catch (err) {
+    await refreshWaFlow(db, { accountId: input.accountId, flowId: data.id }).catch(() => null)
+    const refusal = publishRefusalError(err)
+    if (refusal) throw refusal
+    throw err
+  }
+  const published = await refreshWaFlow(db, { accountId: input.accountId, flowId: data.id })
+  // Publish only succeeds with no pending Meta validation errors, and the
+  // stored row types that list loosely (unknown[] | null) — hand back the
+  // typed empty list instead.
+  return { flow: published, validation_errors: [] }
 }
 
 export interface FlowPatch {
@@ -622,7 +657,13 @@ export async function publishWaFlow(
     throw new FlowLifecycleError(`Only draft forms can be published (this one is ${local.status.toLowerCase()}).`, 409)
   }
   const { accessToken } = await loadFlowConfig(db, input.accountId)
-  await meta(() => publishFlow({ flowId: local.meta_flow_id, accessToken }))
+  try {
+    await meta(() => publishFlow({ flowId: local.meta_flow_id, accessToken }))
+  } catch (err) {
+    const refusal = publishRefusalError(err)
+    if (refusal) throw refusal
+    throw err
+  }
   return refreshWaFlow(db, input)
 }
 

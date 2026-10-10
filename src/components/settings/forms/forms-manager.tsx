@@ -227,7 +227,12 @@ export function FormsManager() {
 
       {creating && (
         <CreateFormDialog
-          onClose={() => setCreating(false)}
+          // Reload even on close: a failed publish-at-create still leaves
+          // the draft saved (see createWaFlow), and the list must show it.
+          onClose={() => {
+            setCreating(false);
+            void reload();
+          }}
           onCreated={async (flow) => {
             setCreating(false);
             await reload();

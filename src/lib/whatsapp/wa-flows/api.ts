@@ -160,8 +160,6 @@ export interface CreateFlowArgs extends AuthArgs {
   categories: string[]
   /** Optional definition — omitted creates an empty draft. */
   flowJson?: Record<string, unknown>
-  /** Publish in the same call (only if the JSON is valid). */
-  publish?: boolean
   endpointUri?: string
 }
 
@@ -176,7 +174,6 @@ export async function createFlow(args: CreateFlowArgs): Promise<CreateFlowResult
     categories: args.categories,
   }
   if (args.flowJson) payload.flow_json = JSON.stringify(args.flowJson)
-  if (args.publish) payload.publish = true
   if (args.endpointUri) payload.endpoint_uri = args.endpointUri
   const response = await metaFetch(`${META_API_BASE}/${args.wabaId}/flows`, {
     method: 'POST',

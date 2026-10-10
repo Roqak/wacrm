@@ -219,6 +219,21 @@ and logo instead of this one's.
   They stay quiet when you have started typing, when you sent the last
   message, and once the 24-hour window closes.
 
+- **WhatsApp Forms (Meta Flows).** Settings → WhatsApp Forms creates the
+  account's forms with or without AI, maps submitted fields onto the
+  contact, and any published form can be attached to a message by the
+  composer, the chatbot builder and the public API. When Meta refuses
+  to publish a form — its account-level integrity check, usually
+  business verification or display name still in review — the form is
+  kept as a draft with the refusal explained, instead of vanishing with
+  only Meta's raw error to show.
+
+  > **Migration required:** apply `supabase/migrations/050_whatsapp_flows.sql`
+  > (the `whatsapp_flows`, `whatsapp_flow_tokens` and
+  > `whatsapp_flow_responses` tables the feature reads and writes), then —
+  > only if the AI form builder is used — `051_ai_form_builder_usage.sql`
+  > (adds the usage rows it logs).
+
 ### Fixed
 
 - **Reply quotes credited the wrong person.** Quoting any outbound

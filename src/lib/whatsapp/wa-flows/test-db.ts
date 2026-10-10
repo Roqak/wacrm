@@ -5,6 +5,7 @@
  * row arrays. Test-only.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 
 type Row = Record<string, unknown>;
 
@@ -31,7 +32,14 @@ export function fakeDb(tables: Record<string, Row[]>): FakeDb {
           return { data: hit, error: null };
         }
         const list = (Array.isArray(values) ? values : [values]) as Row[];
-        const inserted = list.map((v, i) => ({ id: `new-${table}-${i}`, ...v }));
+        // Real Supabase assigns a UUID when the row leaves `id` unset —
+        // several modules validate ids (isFlowUuid), so a fake id must
+        // look like one too.
+        const inserted = list.map((v) => {
+          const row: Row = { ...v };
+          if (row.id === undefined) row.id = randomUUID();
+          return row;
+        });
         tables[table].push(...inserted);
         return { data: inserted, error: null };
       };
