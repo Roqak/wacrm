@@ -22,6 +22,7 @@ import { WHATSAPP_FLOW_CATEGORIES, type WhatsAppFlow } from '@/types';
 import { apiJson } from './api';
 import { STARTER_FLOW_JSON } from './starter-flow';
 import type { FlowValidationError } from './validation-errors';
+import { AiFormAssist, FlowLintSummary } from './ai-assist';
 
 export function CreateFormDialog({
   onClose,
@@ -34,6 +35,9 @@ export function CreateFormDialog({
   const [name, setName] = useState('');
   const [categories, setCategories] = useState<string[]>(['LEAD_GENERATION']);
   const [json, setJson] = useState(JSON.stringify(STARTER_FLOW_JSON, null, 2));
+  // The last AI result. Set → a further description refines it instead
+  // of starting over.
+  const [aiDraft, setAiDraft] = useState<Record<string, unknown> | null>(null);
   const [publish, setPublish] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -85,6 +89,17 @@ export function CreateFormDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          <AiFormAssist
+            currentJson={aiDraft}
+            onResult={(result) => {
+              const pretty = JSON.stringify(result.flow_json, null, 2);
+              setJson(pretty);
+              setAiDraft(result.flow_json);
+              if (result.name && !name.trim()) setName(result.name);
+              if (result.categories.length > 0) setCategories(result.categories);
+            }}
+          />
+
           <div className="space-y-1.5">
             <Label>{t('name')}</Label>
             <Input
@@ -125,6 +140,7 @@ export function CreateFormDialog({
               spellCheck={false}
               className="min-h-72 font-mono text-xs"
             />
+            <FlowLintSummary json={json} />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-muted-foreground">

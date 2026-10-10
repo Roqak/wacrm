@@ -39,6 +39,17 @@ import type { WhatsAppFlow, WhatsAppFlowFieldMapping } from '@/types';
 import { apiJson } from './api';
 import { FLOW_STATUS_CLASS, type EndpointKeyState } from './forms-manager';
 import { ValidationErrorList, type FlowValidationError } from './validation-errors';
+import { AiFormAssist, FlowLintSummary } from './ai-assist';
+
+/** The editor's JSON as an object, or null while it doesn't parse. */
+function parsedOrNull(json: string): Record<string, unknown> | null {
+  try {
+    const v: unknown = JSON.parse(json);
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
 
 type Tab = 'overview' | 'definition' | 'mapping' | 'endpoint' | 'responses';
 
@@ -282,6 +293,7 @@ function DefinitionTab({ flow, canEdit, onChanged }: Props) {
   const [json, setJson] = useState(original);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<FlowValidationError[]>([]);
+  const [metaStale, setMetaStale] = useState(false);
 
   useEffect(() => setJson(original), [original]);
 
@@ -303,6 +315,7 @@ function DefinitionTab({ flow, canEdit, onChanged }: Props) {
         body: JSON.stringify({ flow_json: parsed }),
       });
       setErrors(result.validation_errors);
+      setMetaStale(false);
       onChanged(result.flow);
       if (result.validation_errors.length > 0) toast.warning(t('savedWithErrors'));
       else toast.success(t('saved'));
@@ -318,6 +331,28 @@ function DefinitionTab({ flow, canEdit, onChanged }: Props) {
       <p className="text-xs text-muted-foreground">
         {editable ? t('definitionHelp') : t('definitionFrozen')}
       </p>
+      {editable && (
+        <AiFormAssist
+          currentJson={parsedOrNull(json) ?? flow.flow_json}
+          metaErrors={
+            // Meta's errors describe the SAVED definition; once the AI
+            // has rewritten the editor they no longer apply until the
+            // next save re-validates.
+            metaStale
+              ? []
+              : errors.length > 0
+                ? errors
+                : Array.isArray(flow.validation_errors)
+                  ? (flow.validation_errors as FlowValidationError[])
+                  : []
+          }
+          onResult={(result) => {
+            setJson(JSON.stringify(result.flow_json, null, 2));
+            setErrors([]);
+            setMetaStale(true);
+          }}
+        />
+      )}
       <Textarea
         value={json}
         onChange={(e) => setJson(e.target.value)}
@@ -326,6 +361,7 @@ function DefinitionTab({ flow, canEdit, onChanged }: Props) {
         placeholder={t('definitionEmpty')}
         className="min-h-96 font-mono text-xs"
       />
+      <FlowLintSummary json={json} />
       <ValidationErrorList errors={errors} />
       {editable && (
         <div className="flex justify-end gap-2">

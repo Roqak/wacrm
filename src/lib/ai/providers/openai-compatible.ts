@@ -60,7 +60,7 @@ export async function generateOpenAiCompatible(
           { role: 'system', content: systemPrompt },
           ...mergeConsecutive(messages),
         ],
-        max_completion_tokens: MAX_OUTPUT_TOKENS,
+        max_completion_tokens: args.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
         // Ollama streams by default on some client paths; the response
         // parsing below expects one JSON object, so say so explicitly.
         // OpenAI already defaults to false and ignores the repetition.

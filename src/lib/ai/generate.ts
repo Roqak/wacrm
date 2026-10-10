@@ -17,6 +17,10 @@ export interface GenerateArgs {
   systemPrompt: string
   /** Recent conversation turns, oldest first. */
   messages: ChatMessage[]
+  /** Override the output cap (default: chat-reply sized). */
+  maxOutputTokens?: number
+  /** Override the request timeout (default: `aiRequestTimeoutMs()`). */
+  timeoutMs?: number
 }
 
 /**
@@ -25,14 +29,15 @@ export interface GenerateArgs {
  * of the raw text. Throws `AiError` on any provider/network failure.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
-  const { config, systemPrompt, messages } = args
-  const timeoutMs = aiRequestTimeoutMs()
+  const { config, systemPrompt, messages, maxOutputTokens } = args
+  const timeoutMs = args.timeoutMs ?? aiRequestTimeoutMs()
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
     systemPrompt,
     messages,
     timeoutMs,
+    maxOutputTokens,
   }
 
   let result: { text: string; usage: AiUsage | null }
