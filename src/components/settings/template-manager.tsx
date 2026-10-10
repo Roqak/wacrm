@@ -48,6 +48,11 @@ import type {
   TemplateSampleValues,
 } from '@/types';
 import { templateStatusConfig } from '@/lib/template-status';
+import { useWhatsAppForms } from '@/components/interactive/flow-form-editor';
+import {
+  entryScreenOf,
+  listScreenIds,
+} from '@/lib/whatsapp/wa-flows/definition';
 import {
   extractVariableIndices,
   TEMPLATE_LIMITS,
@@ -143,6 +148,8 @@ function emptyButton(type: TemplateButton['type']): TemplateButton {
       return { type: 'PHONE_NUMBER', text: '', phone_number: '' };
     case 'COPY_CODE':
       return { type: 'COPY_CODE', text: '', example: '' };
+    case 'FLOW':
+      return { type: 'FLOW', text: '', flow_id: '', flow_action: 'navigate' };
   }
 }
 
@@ -414,6 +421,9 @@ export function TemplateManager() {
     url?: string;
     phone_number?: string;
     example?: string;
+    flow_id?: string;
+    flow_action?: 'navigate' | 'data_exchange';
+    navigate_screen?: string;
   };
   function updateButton(index: number, patch: ButtonPatch) {
     setForm((prev) => {
@@ -451,6 +461,19 @@ export function TemplateManager() {
             ...current,
             ...(patch.text !== undefined && { text: patch.text }),
             ...(patch.example !== undefined && { example: patch.example }),
+          };
+          break;
+        case 'FLOW':
+          next[index] = {
+            ...current,
+            ...(patch.text !== undefined && { text: patch.text }),
+            ...(patch.flow_id !== undefined && { flow_id: patch.flow_id }),
+            ...(patch.flow_action !== undefined && {
+              flow_action: patch.flow_action,
+            }),
+            ...(patch.navigate_screen !== undefined && {
+              navigate_screen: patch.navigate_screen,
+            }),
           };
           break;
       }
@@ -1017,6 +1040,12 @@ export function TemplateManager() {
                             >
                               {t('btnCopyCode')}
                             </SelectItem>
+                            <SelectItem
+                              value="FLOW"
+                              className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                            >
+                              {t('btnFlow')}
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                         <Input
@@ -1078,6 +1107,14 @@ export function TemplateManager() {
                             updateButton(i, { example: e.target.value })
                           }
                           className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                        />
+                      )}
+                      {btn.type === 'FLOW' && (
+                        <TemplateFlowButtonFields
+                          flowId={btn.flow_id}
+                          flowAction={btn.flow_action ?? 'navigate'}
+                          navigateScreen={btn.navigate_screen ?? ''}
+                          onChange={(patch) => updateButton(i, patch)}
                         />
                       )}
                     </div>
@@ -1160,5 +1197,104 @@ export function TemplateManager() {
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+/**
+ * FLOW button fields: which WhatsApp Form the button opens, and the
+ * screen it opens on (Meta requires one for `navigate` forms). Picking
+ * a form pre-fills its entry screen.
+ */
+function TemplateFlowButtonFields({
+  flowId,
+  flowAction,
+  navigateScreen,
+  onChange,
+}: {
+  flowId: string;
+  flowAction: 'navigate' | 'data_exchange';
+  navigateScreen: string;
+  onChange: (patch: {
+    flow_id?: string;
+    flow_action?: 'navigate' | 'data_exchange';
+    navigate_screen?: string;
+  }) => void;
+}) {
+  const t = useTranslations('Settings.templates');
+  const { forms, loading } = useWhatsAppForms();
+  // Meta only approves templates whose form is published.
+  const options = forms.filter(
+    (f) => f.status === 'PUBLISHED' || f.meta_flow_id === flowId,
+  );
+  const selected = forms.find((f) => f.meta_flow_id === flowId) ?? null;
+  const screens = listScreenIds(selected?.flow_json);
+  const selectClass =
+    'h-8 w-full rounded-md border border-border bg-muted px-2 text-xs text-foreground';
+
+  return (
+    <div className="space-y-1 pl-1">
+      <select
+        value={flowId}
+        disabled={loading}
+        onChange={(e) => {
+          const form = forms.find((f) => f.meta_flow_id === e.target.value);
+          onChange({
+            flow_id: e.target.value,
+            navigate_screen:
+              form?.first_screen || entryScreenOf(form?.flow_json) || '',
+          });
+        }}
+        className={selectClass}
+      >
+        <option value="">
+          {loading ? t('flowLoading') : t('flowPick')}
+        </option>
+        {options.map((f) => (
+          <option key={f.id} value={f.meta_flow_id}>
+            {f.name}
+            {f.status !== 'PUBLISHED' ? ` (${f.status.toLowerCase()})` : ''}
+          </option>
+        ))}
+      </select>
+      {!loading && options.length === 0 && (
+        <p className="text-[11px] text-muted-foreground">{t('flowNone')}</p>
+      )}
+      <div className="grid grid-cols-2 gap-1">
+        <select
+          value={flowAction}
+          onChange={(e) =>
+            onChange({
+              flow_action: e.target.value as 'navigate' | 'data_exchange',
+            })
+          }
+          className={selectClass}
+        >
+          <option value="navigate">{t('flowActionNavigate')}</option>
+          <option value="data_exchange">{t('flowActionDataExchange')}</option>
+        </select>
+        {flowAction === 'navigate' &&
+          (screens.length > 0 ? (
+            <select
+              value={navigateScreen}
+              onChange={(e) => onChange({ navigate_screen: e.target.value })}
+              className={selectClass}
+            >
+              <option value="">{t('flowScreenPick')}</option>
+              {screens.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              placeholder={t('flowScreenPlaceholder')}
+              value={navigateScreen}
+              onChange={(e) => onChange({ navigate_screen: e.target.value })}
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+            />
+          ))}
+      </div>
+    </div>
   );
 }

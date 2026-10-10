@@ -222,7 +222,7 @@ const sendMessageSchema = jsonSchema({
   required: ['to'],
   properties: {
     to: { type: 'string', description: 'E.164, e.g. +14155550123.' },
-    type: { type: 'string', enum: ['text', 'template', 'image', 'video', 'document', 'audio'], default: 'text' },
+    type: { type: 'string', enum: ['text', 'template', 'interactive', 'image', 'video', 'document', 'audio'], default: 'text' },
     text: { type: 'string', description: 'Body text, or caption for media types. Required for `text`.' },
     media_url: { type: 'string', description: 'Required for image/video/document/audio.' },
     filename: { type: 'string', description: 'Optional document filename.' },
@@ -242,8 +242,63 @@ const sendMessageSchema = jsonSchema({
       },
       required: ['name', 'language'],
     },
+    interactive_payload: {
+      type: 'object',
+      description:
+        'Required when type=interactive. `kind` is `buttons`, `list`, or `flow` (a WhatsApp Form). ' +
+        'A form needs `body`, `flow_id` (Meta’s id — see GET /api/v1/forms) and `cta` (button label, ≤ 20 chars); ' +
+        'optional `header`, `footer`, `screen` (defaults to the form’s first screen), `data` (initial screen data), ' +
+        '`flow_action` (`navigate` | `data_exchange`). Only valid inside the 24h service window — outside it, send a template with a form button. ' +
+        'Submissions arrive on the `form.submitted` webhook and at GET /api/v1/forms/{id}/responses.',
+      properties: {
+        kind: { type: 'string', enum: ['buttons', 'list', 'flow'] },
+        body: { type: 'string' },
+        header: { type: 'string' },
+        footer: { type: 'string' },
+        flow_id: { type: 'string' },
+        cta: { type: 'string' },
+        screen: { type: 'string' },
+        data: { type: 'object' },
+        flow_action: { type: 'string', enum: ['navigate', 'data_exchange'] },
+      },
+      required: ['kind', 'body'],
+    },
     reply_to_message_id: { type: 'string', description: 'Optional; must belong to the same conversation.' },
     name: { type: 'string', description: 'Names a newly-created contact.' },
+  },
+});
+
+const formSchema = jsonSchema({
+  description: 'A WhatsApp Form — a Meta Flow (from `serializeForm`).',
+  properties: {
+    id: { type: 'string' },
+    meta_flow_id: { type: 'string', description: 'Meta’s id — what a send’s `flow_id` takes.' },
+    name: { type: 'string' },
+    status: { type: 'string', enum: ['DRAFT', 'PUBLISHED', 'DEPRECATED', 'BLOCKED', 'THROTTLED'] },
+    categories: { type: 'array', items: { type: 'string' } },
+    first_screen: { type: ['string', 'null'] as string[] },
+    field_mappings: {
+      type: 'array',
+      items: { type: 'object', properties: { field: { type: 'string' }, target: { type: 'string' } } },
+      description: 'Submitted fields copied onto the contact (`name` / `email` / `company` / `custom:<id>`).',
+    },
+    definition: { type: ['object', 'null'] as string[], description: 'The Flow JSON.' },
+    created_at: { type: 'string', format: 'date-time' },
+    updated_at: { type: 'string', format: 'date-time' },
+  },
+});
+
+const formResponseSchema = jsonSchema({
+  description: 'One form submission (from `serializeFormResponse`).',
+  properties: {
+    id: { type: 'string' },
+    form_id: { type: ['string', 'null'] as string[] },
+    meta_flow_id: { type: ['string', 'null'] as string[] },
+    contact_id: { type: ['string', 'null'] as string[] },
+    conversation_id: { type: ['string', 'null'] as string[] },
+    whatsapp_message_id: { type: 'string' },
+    response: { type: 'object', description: 'Submitted fields, keyed by the form’s input names.' },
+    created_at: { type: 'string', format: 'date-time' },
   },
 });
 
@@ -661,6 +716,42 @@ export function buildOpenApiDocument(): JsonObject {
           } as JsonObject,
         },
       },
+      '/api/v1/forms': {
+        get: {
+          summary: 'List WhatsApp Forms (Meta Flows)',
+          ...scoped('forms:read'),
+          parameters: [
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['DRAFT', 'PUBLISHED', 'DEPRECATED', 'BLOCKED', 'THROTTLED'] } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, max: 100 } },
+            { name: 'cursor', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: paginatedResponses(formSchema) as JsonObject,
+        },
+      },
+      '/api/v1/forms/{id}': {
+        get: {
+          summary: 'Read one form, with its definition',
+          ...scoped('forms:read'),
+          parameters: [idParam()],
+          responses: {
+            '200': { description: 'The form.', content: { 'application/json': { schema: envelope(formSchema, 'Form.') } } },
+            '404': notFound,
+          } as JsonObject,
+        },
+      },
+      '/api/v1/forms/{id}/responses': {
+        get: {
+          summary: 'List a form’s submissions',
+          ...scoped('forms:read'),
+          parameters: [
+            idParam(),
+            { name: 'contact_id', in: 'query', schema: { type: 'string' }, description: 'Only this contact’s submissions.' },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, max: 100 } },
+            { name: 'cursor', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: { ...paginatedResponses(formResponseSchema), '404': notFound } as JsonObject,
+        },
+      },
     } as JsonObject,
     components: {
       securitySchemes: {
@@ -677,6 +768,8 @@ export function buildOpenApiDocument(): JsonObject {
         Conversation: conversationSchema,
         Message: messageSchema,
         Template: templateSchema,
+        Form: formSchema,
+        FormResponse: formResponseSchema,
         WebhookEndpoint: webhookEndpointSchema,
       },
     },

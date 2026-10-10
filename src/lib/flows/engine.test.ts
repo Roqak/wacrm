@@ -6,6 +6,8 @@ import {
   isSuspending,
   isTerminal,
   evaluateConditionPredicate,
+  entryTriggerTexts,
+  formReplyMatchesNode,
 } from "./engine";
 
 describe("matchReplyId", () => {
@@ -295,5 +297,47 @@ describe("evaluateConditionPredicate", () => {
         configValue: "anything",
       }),
     ).toBe(false);
+  });
+});
+
+describe("send_form — WhatsApp Forms in the chatbot", () => {
+  it("suspends the run until the form comes back", () => {
+    expect(isSuspending("send_form")).toBe(true);
+    expect(isAutoAdvancing("send_form")).toBe(false);
+  });
+
+  it("never starts a keyword flow from a form submission", () => {
+    expect(
+      entryTriggerTexts({
+        kind: "form_reply",
+        flow_token: null,
+        flow_run_id: null,
+        meta_flow_id: "m-1",
+        fields: { name: "support" },
+        meta_message_id: "w",
+      }),
+    ).toEqual([]);
+  });
+
+  const cfg = { flow_id: "m-1", text: "t", cta: "Go", next_node_key: "n" };
+  const reply = (over: Partial<{ flow_run_id: string | null; meta_flow_id: string | null }>) => ({
+    kind: "form_reply" as const,
+    flow_token: "tok",
+    flow_run_id: null,
+    meta_flow_id: "m-1",
+    fields: {},
+    meta_message_id: "w",
+    ...over,
+  });
+
+  it("matches on the token’s run when there is one — even for the same form", () => {
+    expect(formReplyMatchesNode(reply({ flow_run_id: "run-1" }), "run-1", cfg)).toBe(true);
+    expect(formReplyMatchesNode(reply({ flow_run_id: "run-old" }), "run-1", cfg)).toBe(false);
+  });
+
+  it("falls back to the same form without a run on the token", () => {
+    expect(formReplyMatchesNode(reply({}), "run-1", cfg)).toBe(true);
+    expect(formReplyMatchesNode(reply({ meta_flow_id: "m-2" }), "run-1", cfg)).toBe(false);
+    expect(formReplyMatchesNode(reply({ meta_flow_id: null }), "run-1", cfg)).toBe(false);
   });
 });

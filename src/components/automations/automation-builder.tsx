@@ -33,6 +33,7 @@ import {
   ArrowUp,
   MousePointerClick,
   List,
+  ClipboardList,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -58,8 +59,10 @@ import type {
 import {
   InteractiveBuilder,
   blankButtonsPayload,
+  blankFlowPayload,
   blankListPayload,
 } from "@/components/interactive/interactive-builder"
+import { useWhatsAppForms } from "@/components/interactive/flow-form-editor"
 import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
 import { createClient } from "@/lib/supabase/client"
 import {
@@ -110,6 +113,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   send_message: { label: "send_message", icon: MessageSquare, border: "border-l-primary" },
   send_buttons: { label: "send_buttons", icon: MousePointerClick, border: "border-l-primary" },
   send_list: { label: "send_list", icon: List, border: "border-l-primary" },
+  send_form: { label: "send_form", icon: ClipboardList, border: "border-l-primary" },
   send_template: { label: "send_template", icon: FileText, border: "border-l-primary" },
   add_tag: { label: "add_tag", icon: Tag, border: "border-l-primary" },
   remove_tag: { label: "remove_tag", icon: TagIcon, border: "border-l-primary" },
@@ -126,6 +130,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "send_message",
   "send_buttons",
   "send_list",
+  "send_form",
   "send_template",
   "add_tag",
   "remove_tag",
@@ -143,6 +148,7 @@ const TRIGGER_OPTIONS: { value: AutomationTriggerType }[] = [
   { value: "first_inbound_message" },
   { value: "keyword_match" },
   { value: "interactive_reply" },
+  { value: "form_submitted" },
   { value: "new_contact_created" },
   { value: "conversation_assigned" },
   { value: "tag_added" },
@@ -178,6 +184,8 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
       return toStepConfig(blankButtonsPayload())
     case "send_list":
       return toStepConfig(blankListPayload())
+    case "send_form":
+      return toStepConfig(blankFlowPayload())
     case "send_template":
       return { template_name: "", language: "en_US" }
     case "add_tag":
@@ -858,6 +866,9 @@ function TriggerCard({
             {type === "interactive_reply" && (
               <InteractiveReplyConfig config={config} onChange={onConfigChange} t={t} />
             )}
+            {type === "form_submitted" && (
+              <FormSubmittedConfig config={config} onChange={onConfigChange} t={t} />
+            )}
             {type === "tag_added" && (
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -981,6 +992,54 @@ function KeywordMatchConfig({
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+function FormSubmittedConfig({
+  config,
+  onChange,
+  t,
+}: {
+  config: Record<string, unknown>
+  onChange: (c: Record<string, unknown>) => void
+  t: ReturnType<typeof useTranslations>
+}) {
+  const { forms, loading } = useWhatsAppForms()
+  const selected = Array.isArray(config?.flow_ids) ? (config.flow_ids as string[]) : []
+  const toggle = (id: string) =>
+    onChange({
+      ...config,
+      flow_ids: selected.includes(id)
+        ? selected.filter((x) => x !== id)
+        : [...selected, id],
+    })
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        {t("formTriggerForms")}
+      </label>
+      {loading ? (
+        <p className="text-xs text-muted-foreground">…</p>
+      ) : forms.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("formTriggerNone")}</p>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {forms.map((f) => (
+            <label key={f.id} className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={selected.includes(f.id)}
+                onChange={() => toggle(f.id)}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              {f.name}
+            </label>
+          ))}
+        </div>
+      )}
+      <p className="mt-1 text-[11px] text-muted-foreground">{t("formTriggerHelp")}</p>
     </div>
   )
 }
@@ -1316,11 +1375,15 @@ function StepEditor({
       )
     case "send_buttons":
     case "send_list":
+    case "send_form":
       // The whole step_config IS the interactive payload; the shared
       // builder edits it in place (and enforces Meta's limits + preview).
+      // A form step only ever sends a form; the menu steps keep their
+      // buttons ⇄ list toggle.
       return (
         <InteractiveBuilder
           value={asInteractive(cfg)}
+          kinds={step.step_type === "send_form" ? ["flow"] : ["buttons", "list"]}
           onChange={(payload) =>
             onChange({ ...step, step_config: toStepConfig(payload) })
           }
@@ -1534,6 +1597,7 @@ function previewFor(step: BuilderStep): string {
       return (step.step_config.text as string) || "no text yet"
     case "send_buttons":
     case "send_list":
+    case "send_form":
       return interactivePayloadPreviewText(asInteractive(step.step_config)) || "no body yet"
     case "send_template":
       return (step.step_config.template_name as string) || "pick a template"

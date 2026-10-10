@@ -15,6 +15,13 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import {
+  findLocalFlow,
+  mintFlowToken,
+  recordFlowToken,
+  templateFlowButton,
+} from '@/lib/whatsapp/wa-flows/send'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 interface BroadcastResult {
   phone: string
@@ -160,6 +167,15 @@ export async function POST(request: Request) {
     }
     const templateRow = resolvedTemplate.row
 
+    // WhatsApp Form button → one token per recipient, so each
+    // submission maps back to its form (broadcast sends never land in
+    // `messages`, which is the webhook's other way to find the form).
+    // The webhook resolves the contact itself from the sender's phone.
+    const flowButton = templateFlowButton(templateRow)
+    const localFlow = flowButton
+      ? await findLocalFlow(supabase, accountId, flowButton.flow_id)
+      : null
+
     const results: BroadcastResult[] = []
     let sentCount = 0
     let failedCount = 0
@@ -182,6 +198,14 @@ export async function POST(request: Request) {
       const variants = phoneVariants(sanitized)
       let sentMessageId: string | null = null
       let lastError: string | null = null
+      const flowToken = flowButton ? mintFlowToken() : undefined
+      const messageParams = flowToken
+        ? {
+            ...(recipient.messageParams ?? {}),
+            ...(recipient.messageParams?.body ? {} : { body: recipient.params ?? [] }),
+            flowToken,
+          }
+        : recipient.messageParams
 
       for (const variant of variants) {
         try {
@@ -192,7 +216,7 @@ export async function POST(request: Request) {
             templateName: template_name,
             language: resolvedTemplate.language,
             template: templateRow ?? undefined,
-            messageParams: recipient.messageParams,
+            messageParams,
             params: recipient.params ?? [],
           })
           sentMessageId = result.messageId
@@ -208,6 +232,17 @@ export async function POST(request: Request) {
           lastError = errorMessage
           // retry with next variant
         }
+      }
+
+      if (sentMessageId && flowToken && flowButton) {
+        await recordFlowToken(supabaseAdmin(), {
+          token: flowToken,
+          accountId,
+          flowId: localFlow?.id ?? null,
+          metaFlowId: flowButton.flow_id,
+          source: 'broadcast',
+          waMessageId: sentMessageId,
+        })
       }
 
       if (sentMessageId) {

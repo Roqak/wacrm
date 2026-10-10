@@ -27,8 +27,20 @@ import {
   sendMediaMessage,
   sendInteractiveButtons,
   sendInteractiveList,
+  sendInteractiveFlow,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api';
+import {
+  findLocalFlow,
+  FlowSendError,
+  mintFlowToken,
+  prepareFlowPayload,
+  recordFlowToken,
+  templateFlowButton,
+  type FlowTokenSource,
+  type LocalFlowRef,
+} from '@/lib/whatsapp/wa-flows/send';
+import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
 import {
   validateInteractivePayload,
   interactivePayloadPreviewText,
@@ -100,6 +112,12 @@ export interface SendMessageParams {
    * unlabelled bubble.
    */
   senderId?: string | null;
+  /**
+   * Who is sending, for WhatsApp Form token bookkeeping
+   * (`whatsapp_flow_tokens.source`). Defaults to `inbox`; the public
+   * API passes `api`.
+   */
+  source?: FlowTokenSource;
 }
 
 export interface SendMessageResult {
@@ -211,10 +229,11 @@ export async function sendMessageToConversation(
     templateLanguage,
     templateParams,
     templateMessageParams,
-    interactivePayload,
     replyToMessageId,
     senderId,
+    source = 'inbox',
   } = params;
+  let { interactivePayload } = params;
 
   if (!conversationId) {
     throw new SendMessageError(
@@ -349,6 +368,39 @@ export async function sendMessageToConversation(
     sendLanguage = resolved.language;
   }
 
+  // WhatsApp Form: mint the flow_token and resolve the opening screen
+  // before the send, so the persisted payload is exactly what Meta got.
+  let sentFlow: LocalFlowRef | null = null;
+  if (messageType === 'interactive' && interactivePayload?.kind === 'flow') {
+    try {
+      const prepared = await prepareFlowPayload(db, {
+        accountId,
+        payload: interactivePayload,
+        accessToken,
+      });
+      interactivePayload = prepared.payload;
+      sentFlow = prepared.localFlow;
+    } catch (err) {
+      if (err instanceof FlowSendError) {
+        throw new SendMessageError('bad_request', err.message, 400);
+      }
+      throw err;
+    }
+  }
+
+  // A template with a WhatsApp Form button: mint a token so the
+  // submission maps back to this contact + conversation.
+  const templateFlow =
+    messageType === 'template' ? templateFlowButton(templateRow) : null;
+  const templateFlowToken = templateFlow ? mintFlowToken() : undefined;
+  const templateSendParams =
+    templateFlowToken
+      ? {
+          ...((templateMessageParams as SendTimeParams | undefined) ?? {}),
+          flowToken: templateFlowToken,
+        }
+      : (templateMessageParams as SendTimeParams | undefined);
+
   const attempt = async (phone: string): Promise<string> => {
     if (messageType === 'template') {
       const result = await sendTemplateMessage({
@@ -358,7 +410,7 @@ export async function sendMessageToConversation(
         templateName: templateName!,
         language: sendLanguage,
         template: templateRow ?? undefined,
-        messageParams: templateMessageParams ?? undefined,
+        messageParams: templateSendParams,
         params: templateParams || [],
         contextMessageId,
       });
@@ -379,6 +431,25 @@ export async function sendMessageToConversation(
     }
     if (messageType === 'interactive') {
       const p = interactivePayload!;
+      if (p.kind === 'flow') {
+        const result = await sendInteractiveFlow({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          to: phone,
+          bodyText: p.body,
+          headerText: p.header || undefined,
+          footerText: p.footer || undefined,
+          flowId: p.flow_id,
+          flowCta: p.cta,
+          flowToken: p.flow_token!,
+          flowAction: p.flow_action,
+          screen: p.screen,
+          data: p.data,
+          mode: p.mode,
+          contextMessageId,
+        });
+        return result.messageId;
+      }
       if (p.kind === 'buttons') {
         const result = await sendInteractiveButtons({
           phoneNumberId: config.phone_number_id,
@@ -448,6 +519,34 @@ export async function sendMessageToConversation(
       err instanceof Error ? err.message : 'Unknown Meta API error';
     console.error('[send-message] Meta send failed for all variants:', message);
     throw new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
+  }
+
+  if (templateFlow && templateFlowToken) {
+    const localFlow = await findLocalFlow(db, accountId, templateFlow.flow_id);
+    await recordFlowToken(supabaseAdmin(), {
+      token: templateFlowToken,
+      accountId,
+      flowId: localFlow?.id ?? null,
+      metaFlowId: templateFlow.flow_id,
+      contactId: contact.id,
+      conversationId,
+      source: source === 'api' ? 'api' : 'template',
+      waMessageId,
+    });
+  }
+
+  if (interactivePayload?.kind === 'flow' && interactivePayload.flow_token) {
+    // Service-role: token rows are server-only (no member INSERT grant).
+    await recordFlowToken(supabaseAdmin(), {
+      token: interactivePayload.flow_token,
+      accountId,
+      flowId: sentFlow?.id ?? null,
+      metaFlowId: interactivePayload.flow_id,
+      contactId: contact.id,
+      conversationId,
+      source,
+      waMessageId,
+    });
   }
 
   if (workingPhone !== sanitizedPhone) {

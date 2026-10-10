@@ -313,6 +313,25 @@ export interface Message {
    * badge in the inbox. Migration 033.
    */
   ai_generated?: boolean;
+  /**
+   * Set on an INBOUND message that completed a WhatsApp Form (Meta
+   * Flow): the customer's submitted fields plus the form they came
+   * from. The inbox renders it as a "form submitted" card. Migration
+   * 050.
+   */
+  flow_response?: MessageFlowResponse | null;
+}
+
+/** The `messages.flow_response` column (migration 050). */
+export interface MessageFlowResponse {
+  /** Local `whatsapp_flows.id`, when the form is in the catalog. */
+  flow_id: string | null;
+  /** Meta's flow id, when known. */
+  meta_flow_id: string | null;
+  /** Form name at submission time, for display. */
+  flow_name: string | null;
+  /** Submitted fields (Meta's `flow_token` key removed). */
+  response: Record<string, unknown>;
 }
 
 export type ReactionActor = 'customer' | 'agent';
@@ -373,7 +392,19 @@ export type TemplateButton =
   | { type: 'QUICK_REPLY'; text: string }
   | { type: 'URL'; text: string; url: string; example?: string }
   | { type: 'PHONE_NUMBER'; text: string; phone_number: string }
-  | { type: 'COPY_CODE'; text: string; example: string };
+  | { type: 'COPY_CODE'; text: string; example: string }
+  /**
+   * Opens a WhatsApp Form (Meta Flow). `flow_id` is Meta's id; the
+   * form must be PUBLISHED before Meta approves the template.
+   * `navigate_screen` is required by Meta for `navigate` forms.
+   */
+  | {
+      type: 'FLOW';
+      text: string;
+      flow_id: string;
+      flow_action?: 'navigate' | 'data_exchange';
+      navigate_screen?: string;
+    };
 
 export interface TemplateSampleValues {
   body?: string[];
@@ -401,6 +432,77 @@ export interface MessageTemplate {
   submission_error?: string;
   last_submitted_at?: string;
   created_at: string;
+}
+
+// ============================================================
+// WhatsApp Forms — Meta WhatsApp Flows (migration 050)
+// ============================================================
+
+/** Meta's flow lifecycle status, stored verbatim. */
+export type WhatsAppFlowStatus =
+  | 'DRAFT'
+  | 'PUBLISHED'
+  | 'DEPRECATED'
+  | 'BLOCKED'
+  | 'THROTTLED';
+
+/** Meta's flow categories. */
+export const WHATSAPP_FLOW_CATEGORIES = [
+  'SIGN_UP',
+  'SIGN_IN',
+  'APPOINTMENT_BOOKING',
+  'LEAD_GENERATION',
+  'CONTACT_US',
+  'CUSTOMER_SUPPORT',
+  'SURVEY',
+  'OTHER',
+] as const;
+export type WhatsAppFlowCategory = (typeof WHATSAPP_FLOW_CATEGORIES)[number];
+
+/**
+ * Copies one submitted field onto the contact. `target` uses the same
+ * encoding as the automation `update_contact_field` step: a built-in
+ * column (`name` / `email` / `company`) or `custom:<custom_field_id>`.
+ */
+export interface WhatsAppFlowFieldMapping {
+  field: string;
+  target: string;
+}
+
+export interface WhatsAppFlow {
+  id: string;
+  account_id: string;
+  user_id: string | null;
+  meta_flow_id: string;
+  name: string;
+  status: WhatsAppFlowStatus;
+  categories: string[];
+  flow_json: Record<string, unknown> | null;
+  json_version: string | null;
+  data_api_version: string | null;
+  endpoint_uri: string | null;
+  validation_errors: unknown[] | null;
+  first_screen: string | null;
+  field_mappings: WhatsAppFlowFieldMapping[];
+  endpoint_forward_url: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WhatsAppFlowResponse {
+  id: string;
+  account_id: string;
+  flow_id: string | null;
+  meta_flow_id: string | null;
+  flow_token: string | null;
+  contact_id: string | null;
+  conversation_id: string | null;
+  message_id: string | null;
+  wa_message_id: string;
+  response: Record<string, unknown>;
+  created_at: string;
+  contact?: Pick<Contact, 'id' | 'name' | 'phone'> | null;
 }
 
 export interface Pipeline {
@@ -520,12 +622,19 @@ export type AutomationTriggerType =
   | 'time_based'
   /** Customer tapped a reply button / list row whose id matches; lets
    *  multi-step menus be chained across automations. */
-  | 'interactive_reply';
+  | 'interactive_reply'
+  /** Customer submitted a WhatsApp Form (Meta Flow). Optionally
+   *  narrowed to specific forms; the submitted fields are exposed to
+   *  steps as `{{vars.<field>}}`. */
+  | 'form_submitted';
 
 export type AutomationStepType =
   | 'send_message'
   | 'send_buttons'
   | 'send_list'
+  /** Sends a WhatsApp Form (Meta Flow); step_config is an
+   *  InteractiveFlowPayload. */
+  | 'send_form'
   | 'send_template'
   | 'add_tag'
   | 'remove_tag'
@@ -568,12 +677,18 @@ export interface InteractiveReplyTriggerConfig {
   reply_ids: string[];
 }
 
+export interface FormSubmittedTriggerConfig {
+  /** Local `whatsapp_flows.id`s to match. Empty or absent = any form. */
+  flow_ids?: string[];
+}
+
 export type AutomationTriggerConfig =
   | Record<string, never>
   | KeywordMatchTriggerConfig
   | TagTriggerConfig
   | TimeBasedTriggerConfig
   | InteractiveReplyTriggerConfig
+  | FormSubmittedTriggerConfig
   | Record<string, unknown>;
 
 export interface SendMessageStepConfig {

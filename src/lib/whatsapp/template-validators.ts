@@ -30,6 +30,8 @@ export const TEMPLATE_LIMITS = {
   maxUrlButtons: 2,
   maxPhoneButtons: 1,
   maxCopyCodeButtons: 1,
+  /** Meta allows one WhatsApp Form (FLOW) button per template. */
+  maxFlowButtons: 1,
   /** Meta: lowercase a-z, digits, underscore. Up to 512 chars. */
   nameRegex: /^[a-z0-9_]{1,512}$/,
 } as const;
@@ -174,6 +176,7 @@ function countButtonsByType(
     URL: 0,
     PHONE_NUMBER: 0,
     COPY_CODE: 0,
+    FLOW: 0,
   };
   for (const b of buttons) counts[b.type]++;
   return counts;
@@ -204,6 +207,12 @@ export function validateButtons(buttons: TemplateButton[] | undefined): void {
     );
   }
 
+  if (counts.FLOW > TEMPLATE_LIMITS.maxFlowButtons) {
+    throw new Error(
+      `At most ${TEMPLATE_LIMITS.maxFlowButtons} form (FLOW) button allowed (got ${counts.FLOW}).`,
+    );
+  }
+
   // Meta rule: QUICK_REPLY buttons must be contiguous — they can't be
   // interleaved with CTA buttons. Easiest check: walk the array; once
   // we leave the QUICK_REPLY block, we must not see another.
@@ -212,7 +221,7 @@ export function validateButtons(buttons: TemplateButton[] | undefined): void {
     if (b.type === 'QUICK_REPLY') {
       if (sawNonQR) {
         throw new Error(
-          'QUICK_REPLY buttons cannot be interleaved with URL / PHONE_NUMBER / COPY_CODE buttons — group them at the start.',
+          'QUICK_REPLY buttons cannot be interleaved with URL / PHONE_NUMBER / COPY_CODE / FLOW buttons — group them at the start.',
         );
       }
     } else {
@@ -271,6 +280,26 @@ export function validateButtons(buttons: TemplateButton[] | undefined): void {
         if (!b.example?.trim()) {
           throw new Error(
             `COPY_CODE button #${i + 1} is missing example value.`,
+          );
+        }
+        break;
+      case 'FLOW':
+        if (!b.flow_id?.trim()) {
+          throw new Error(`Form button #${i + 1} needs a form.`);
+        }
+        if (
+          b.flow_action !== undefined &&
+          b.flow_action !== 'navigate' &&
+          b.flow_action !== 'data_exchange'
+        ) {
+          throw new Error(
+            `Form button #${i + 1} action must be "navigate" or "data_exchange".`,
+          );
+        }
+        // Meta requires the opening screen for navigate forms.
+        if ((b.flow_action ?? 'navigate') === 'navigate' && !b.navigate_screen?.trim()) {
+          throw new Error(
+            `Form button #${i + 1} needs the screen the form opens on.`,
           );
         }
         break;

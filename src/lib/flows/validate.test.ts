@@ -547,3 +547,35 @@ describe("reachableFromEntry", () => {
     expect(set).toEqual(new Set(["a", "b"]));
   });
 });
+
+describe("validateFlowForActivation — send_form", () => {
+  const baseFlow = { ...validFlow, entry_node_id: "s" };
+  const nodesWith = (formConfig: Record<string, unknown>) => [
+    { node_key: "s", node_type: "start", config: { next_node_key: "f" } },
+    { node_key: "f", node_type: "send_form", config: formConfig },
+    { node_key: "h", node_type: "handoff", config: {} },
+  ];
+  const good = {
+    flow_id: "123",
+    flow_name: "Sign up",
+    text: "Tell us about you",
+    cta: "Open form",
+    var_prefix: "signup",
+    next_node_key: "h",
+  };
+
+  it("passes on a complete send_form node (and its edge keeps the handoff reachable)", () => {
+    expect(validateFlowForActivation(baseFlow, nodesWith(good))).toEqual([]);
+  });
+
+  it.each([
+    ["flow_id", { flow_id: "" }],
+    ["text", { text: " " }],
+    ["cta", { cta: "x".repeat(21) }],
+    ["var_prefix", { var_prefix: "9bad" }],
+    ["next_node_key", { next_node_key: "missing" }],
+  ])("flags a bad %s", (field, patch) => {
+    const issues = validateFlowForActivation(baseFlow, nodesWith({ ...good, ...patch }));
+    expect(issues.some((i) => i.node_key === "f" && i.field === field)).toBe(true);
+  });
+});

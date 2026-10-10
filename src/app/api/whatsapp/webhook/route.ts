@@ -15,6 +15,12 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import {
+  recordFlowSubmission,
+  resolveFlowSubmission,
+  type ResolvedFlowSubmission,
+} from '@/lib/whatsapp/wa-flows/submission'
+import { submissionVars } from '@/lib/whatsapp/wa-flows/definition'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -137,9 +143,15 @@ interface WhatsAppMessage {
    * to advance the per-contact run.
    */
   interactive?: {
-    type: 'button_reply' | 'list_reply'
+    type: 'button_reply' | 'list_reply' | 'nfm_reply'
     button_reply?: { id: string; title: string }
     list_reply?: { id: string; title: string; description?: string }
+    /**
+     * A completed WhatsApp Form (Meta Flow). `response_json` is a JSON
+     * *string* of the submitted fields plus the `flow_token` we minted
+     * at send time.
+     */
+    nfm_reply?: { name?: string; body?: string; response_json?: string }
   }
   /**
    * Set when the customer taps a QUICK_REPLY button on a *template*
@@ -815,12 +827,28 @@ async function processMessage(
   }
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(
-      message,
-      accessToken,
-      mirrorMedia ? { accountId } : null
-    )
+  const parsed = await parseMessageContent(
+    message,
+    accessToken,
+    mirrorMedia ? { accountId } : null
+  )
+  const { mediaUrl, mediaType, interactiveReplyId } = parsed
+  let { contentText } = parsed
+
+  // A completed WhatsApp Form. Resolved BEFORE the idempotent insert —
+  // lookups only — so the message row carries the readable summary and
+  // the submitted fields; the writes wait until we know this delivery
+  // isn't a replay (recordFlowSubmission, below the insert).
+  let flowSubmission: ResolvedFlowSubmission | null = null
+  if (message.type === 'interactive' && message.interactive?.type === 'nfm_reply') {
+    flowSubmission = await resolveFlowSubmission(supabaseAdmin(), {
+      accountId,
+      conversationId: conversation.id,
+      responseJson: message.interactive.nfm_reply?.response_json,
+      contextWamid: message.context?.id ?? null,
+    })
+    contentText = flowSubmission.summary
+  }
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -902,6 +930,8 @@ async function processMessage(
         // the column; null for every other content_type so existing inserts
         // behave identically.
         interactive_reply_id: interactiveReplyId,
+        // Only set for a completed WhatsApp Form (migration 050).
+        flow_response: flowSubmission?.messageFlowResponse ?? null,
       },
       { onConflict: 'conversation_id,message_id', ignoreDuplicates: true }
     )
@@ -922,6 +952,19 @@ async function processMessage(
       message.id
     )
     return
+  }
+
+  // Form submission side effects — after the replay check, so a retried
+  // delivery doesn't double-record the response or re-run mappings.
+  if (flowSubmission) {
+    await recordFlowSubmission(supabaseAdmin(), {
+      accountId,
+      contactId: contactRecord.id,
+      conversationId: conversation.id,
+      messageId: (insertedRows[0] as { id: string }).id,
+      waMessageId: message.id,
+      submission: flowSubmission,
+    })
   }
 
   // Update conversation. The unread bump is done DB-side (migration 037's
@@ -978,8 +1021,16 @@ async function processMessage(
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
-    message:
-      interactiveReplyId
+    message: flowSubmission
+      ? {
+          kind: 'form_reply',
+          flow_token: flowSubmission.flowToken,
+          flow_run_id: flowSubmission.flowRunId,
+          meta_flow_id: flowSubmission.metaFlowId,
+          fields: flowSubmission.fields,
+          meta_message_id: message.id,
+        }
+      : interactiveReplyId
         ? {
             kind: 'interactive_reply',
             reply_id: interactiveReplyId,
@@ -1007,11 +1058,17 @@ async function processMessage(
     | 'new_message_received'
     | 'keyword_match'
     | 'interactive_reply'
+    | 'form_submitted'
   )[] = []
   // Content-level triggers are suppressed when a flow consumed the
   // message — see the comment block above.
   if (!flowConsumed) {
-    automationTriggers.push('new_message_received', 'keyword_match')
+    automationTriggers.push('new_message_received')
+    // A form submission's content_text is our generated summary, not
+    // something the customer typed — keyword-matching it would fire
+    // keyword automations on field labels and values.
+    if (flowSubmission) automationTriggers.push('form_submitted')
+    else automationTriggers.push('keyword_match')
     // Interactive tap → fire the interactive_reply trigger too (only
     // meaningful when a button/list reply actually arrived). Enables
     // automation-only chained menus; when a Flow owns the menu it will
@@ -1047,6 +1104,14 @@ async function processMessage(
         // Only set on interactive taps; drives the interactive_reply
         // trigger's exact-id match.
         interactive_reply_id: interactiveReplyId ?? undefined,
+        // Form submissions: which form (form_submitted's filter) and
+        // the fields as `{{vars.<field>}}`.
+        ...(flowSubmission
+          ? {
+              flow_id: flowSubmission.flowId ?? undefined,
+              vars: submissionVars(flowSubmission.fields),
+            }
+          : {}),
       },
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
@@ -1056,7 +1121,7 @@ async function processMessage(
   // the account has enabled it. Awaited inside `after()` (same reason as
   // the webhook dispatch below); `dispatchInboundToAiReply` owns its
   // eligibility gates + try/catch and never throws.
-  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
+  if (!flowConsumed && !interactiveReplyId && !flowSubmission && inboundText.trim()) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,
@@ -1079,6 +1144,18 @@ async function processMessage(
     content_type: contentType,
     text: contentText,
   })
+
+  if (flowSubmission) {
+    await dispatchWebhookEvent(supabaseAdmin(), accountId, 'form.submitted', {
+      conversation_id: conversation.id,
+      contact_id: contactRecord.id,
+      whatsapp_message_id: message.id,
+      form_id: flowSubmission.flowId,
+      meta_flow_id: flowSubmission.metaFlowId,
+      form_name: flowSubmission.flowName,
+      response: flowSubmission.fields,
+    })
+  }
 }
 
 async function parseMessageContent(
@@ -1245,6 +1322,11 @@ async function parseMessageContent(
       // Use the human-readable title as contentText so the inbox bubble
       // renders the tap legibly ("Existing customer"), and stash the
       // stable id separately so the Flows engine can route on it.
+      // A completed WhatsApp Form. processMessage replaces this
+      // placeholder with the resolved summary (it needs DB lookups).
+      if (message.interactive?.type === 'nfm_reply') {
+        return { ...empty, contentText: '[Form submitted]' }
+      }
       const reply =
         message.interactive?.button_reply ?? message.interactive?.list_reply
       if (reply?.id) {

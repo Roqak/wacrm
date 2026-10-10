@@ -32,6 +32,11 @@ interface MetaButton {
   url?: string
   phone_number?: string
   example?: string[] | string
+  // FLOW buttons. Meta has returned flow_id as a number on some API
+  // versions and flow_action upper-cased, so both are normalised.
+  flow_id?: string | number
+  flow_action?: string
+  navigate_screen?: string
 }
 
 interface MetaTemplateComponent {
@@ -107,7 +112,19 @@ function parseButtons(metaButtons: MetaButton[] | undefined): TemplateButton[] {
           example: Array.isArray(b.example) ? b.example[0] ?? '' : b.example ?? '',
         })
         break
-      // OTP, FLOW, etc — out of scope for v1; drop silently.
+      case 'FLOW': {
+        if (b.flow_id === undefined || b.flow_id === null) break
+        const action = b.flow_action?.toLowerCase()
+        out.push({
+          type: 'FLOW',
+          text: b.text,
+          flow_id: String(b.flow_id),
+          flow_action: action === 'data_exchange' ? 'data_exchange' : 'navigate',
+          ...(b.navigate_screen ? { navigate_screen: b.navigate_screen } : {}),
+        })
+        break
+      }
+      // OTP, etc — out of scope; drop silently.
     }
   }
   return out

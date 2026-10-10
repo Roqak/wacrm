@@ -10,7 +10,8 @@
  */
 
 const META_API_VERSION = 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+/** Exported for sibling Meta clients (e.g. `wa-flows/api.ts`). */
+export const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
 // Graph API answers within seconds normally; a call with no timeout can
 // hang for minutes (dead egress, DNS black hole) on a route that also
@@ -21,7 +22,7 @@ const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 const META_CALL_TIMEOUT_MS = 20_000
 const META_DOWNLOAD_TIMEOUT_MS = 60_000
 
-async function metaFetch(
+export async function metaFetch(
   url: string,
   init?: RequestInit & { timeoutMs?: number },
 ): Promise<Response> {
@@ -70,7 +71,7 @@ interface MetaErrorResponse {
   }
 }
 
-async function throwMetaError(response: Response, fallback: string): Promise<never> {
+export async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
   try {
     const data = (await response.json()) as MetaErrorResponse
@@ -463,6 +464,8 @@ export async function sendTemplateMessage(
       headerMediaUrl: messageParams?.headerMediaUrl,
       headerMediaId: messageParams?.headerMediaId,
       buttonParams: messageParams?.buttonParams,
+      flowToken: messageParams?.flowToken,
+      flowActionData: messageParams?.flowActionData,
     })
     if (components.length > 0) {
       templatePayload.components = components
@@ -790,6 +793,7 @@ export const INTERACTIVE_LIMITS = {
   bodyMaxLength: 1024,
   footerMaxLength: 60,
   headerTextMaxLength: 60,
+  flowCtaMaxLength: 20,
 } as const
 
 export interface InteractiveButton {
@@ -1023,6 +1027,110 @@ export async function sendInteractiveList(
   }
   const data = await response.json()
   return { messageId: data.messages[0].id }
+}
+
+export interface SendInteractiveFlowArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  headerText?: string
+  footerText?: string
+  /** Meta's flow id. */
+  flowId: string
+  /** Label of the button that opens the form (≤ 20 chars). */
+  flowCta: string
+  /** Opaque id Meta echoes back on the submission + endpoint calls. */
+  flowToken: string
+  /** Default `navigate`. */
+  flowAction?: 'navigate' | 'data_exchange'
+  /** Screen to open — required by Meta for `navigate`. */
+  screen?: string
+  /** Initial data for the opening screen (`navigate` only). */
+  data?: Record<string, unknown>
+  /** `draft` sends an unpublished flow (testing). */
+  mode?: 'draft' | 'published'
+  contextMessageId?: string
+}
+
+/**
+ * Send a WhatsApp Flow ("WhatsApp Form") as an interactive message. The
+ * customer taps the CTA, fills the form natively, and Meta delivers a
+ * webhook with `messages[0].interactive.type === 'nfm_reply'` whose
+ * `response_json` carries the fields plus our `flow_token`.
+ *
+ * Only valid inside the 24h customer-service window — outside it, a
+ * form goes out as a template with a FLOW button instead.
+ *
+ *   https://developers.facebook.com/docs/whatsapp/flows/guides/sendingaflow
+ */
+export async function sendInteractiveFlow(
+  args: SendInteractiveFlowArgs
+): Promise<MetaSendResult> {
+  const {
+    phoneNumberId, accessToken, to,
+    bodyText, headerText, footerText,
+    flowId, flowCta, flowToken, flowAction = 'navigate', screen, data, mode,
+    contextMessageId,
+  } = args
+  validateInteractiveBody(bodyText)
+  validateInteractiveHeaderFooter(headerText, footerText)
+  if (!flowId) throw new Error('Flow message requires a flow id.')
+  if (!flowToken) throw new Error('Flow message requires a flow token.')
+  if (!flowCta) throw new Error('Flow message requires a button label.')
+  if (flowCta.length > INTERACTIVE_LIMITS.flowCtaMaxLength) {
+    throw new Error(
+      `Flow button label "${flowCta}" exceeds ${INTERACTIVE_LIMITS.flowCtaMaxLength} chars.`
+    )
+  }
+  if (flowAction === 'navigate' && !screen) {
+    throw new Error('A "navigate" flow message requires the screen to open.')
+  }
+
+  const parameters: Record<string, unknown> = {
+    flow_message_version: '3',
+    flow_token: flowToken,
+    flow_id: flowId,
+    flow_cta: flowCta,
+    flow_action: flowAction,
+  }
+  if (mode === 'draft') parameters.mode = 'draft'
+  if (flowAction === 'navigate') {
+    const actionPayload: Record<string, unknown> = { screen }
+    if (data && Object.keys(data).length > 0) actionPayload.data = data
+    parameters.flow_action_payload = actionPayload
+  }
+
+  const interactive: Record<string, unknown> = {
+    type: 'flow',
+    body: { text: bodyText },
+    action: { name: 'flow', parameters },
+  }
+  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (footerText) interactive.footer = { text: footerText }
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive,
+  }
+  if (contextMessageId) body.context = { message_id: contextMessageId }
+
+  const response = await metaFetch(`${META_API_BASE}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const result = await response.json()
+  return { messageId: result.messages[0].id }
 }
 
 function validateInteractiveBody(bodyText: string): void {

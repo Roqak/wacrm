@@ -111,3 +111,24 @@ describe("middleware — refreshed auth cookies survive redirects", () => {
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
   });
 });
+
+describe("middleware — WhatsApp Forms data endpoint", () => {
+  it("lets Meta reach the signature-authenticated endpoint without a session", async () => {
+    mockUser = null;
+    const res = await middleware(
+      new NextRequest(
+        "https://app.test/api/whatsapp/flows/endpoint/00000000-0000-0000-0000-000000000000",
+        { method: "POST" },
+      ),
+    );
+    expect(res.status).not.toBe(401);
+  });
+
+  it("still requires a session for the rest of the forms API", async () => {
+    mockUser = null;
+    const res = await middleware(
+      new NextRequest("https://app.test/api/whatsapp/flows/sync", { method: "POST" }),
+    );
+    expect(res.status).toBe(401);
+  });
+});

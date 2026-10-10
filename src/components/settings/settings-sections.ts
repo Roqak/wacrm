@@ -1,4 +1,5 @@
 import {
+  ClipboardList,
   Coins,
   FileText,
   KeyRound,
@@ -30,6 +31,7 @@ export const SETTINGS_SECTIONS = [
   'whatsapp',
   'webhook-events',
   'templates',
+  'forms',
   'quick-replies',
   'fields',
   'deals',
@@ -57,6 +59,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace' },
   'webhook-events': { id: 'webhook-events', label: 'Webhook events', icon: Webhook, group: 'workspace' },
   templates: { id: 'templates', label: 'Templates', icon: FileText, group: 'workspace' },
+  forms: { id: 'forms', label: 'WhatsApp Forms', icon: ClipboardList, group: 'workspace' },
   'quick-replies': { id: 'quick-replies', label: 'Quick replies', icon: Zap, group: 'workspace' },
   fields: { id: 'fields', label: 'Fields & tags', icon: Tags, group: 'workspace' },
   deals: { id: 'deals', label: 'Deals & currency', icon: Coins, group: 'workspace' },

@@ -11,6 +11,7 @@ import {
   LayoutTemplate,
   CornerDownLeft,
   Sparkles,
+  ClipboardCheck,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -23,6 +24,11 @@ import {
   MediaVideoBubble,
 } from "./message-media";
 import { InteractivePreview } from "@/components/interactive/interactive-preview";
+import {
+  formatFieldValue,
+  humanizeFieldName,
+} from "@/lib/whatsapp/wa-flows/definition";
+import type { MessageFlowResponse } from "@/types";
 import { useTranslations } from "next-intl";
 
 interface MessageBubbleProps {
@@ -194,6 +200,10 @@ function MessageContent({
       if (message.interactive_payload) {
         return <InteractivePreview payload={message.interactive_payload} />;
       }
+      // INBOUND completed WhatsApp Form: the submitted answers.
+      if (message.flow_response) {
+        return <FormResponseCard response={message.flow_response} />;
+      }
       if (message.sender_type === "customer") {
         return (
           <div className="flex flex-col gap-0.5">
@@ -221,6 +231,36 @@ function MessageContent({
         </p>
       );
   }
+}
+
+/** A customer's WhatsApp Form submission: one row per answered field. */
+function FormResponseCard({ response }: { response: MessageFlowResponse }) {
+  const t = useTranslations("Inbox.bubble");
+  const entries = Object.entries(response.response ?? {})
+    .map(([key, value]) => [key, formatFieldValue(value)] as const)
+    .filter(([, value]) => value !== "");
+  return (
+    <div className="flex min-w-48 flex-col gap-1">
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <ClipboardCheck className="h-3 w-3" />
+        {response.flow_name
+          ? t("formSubmittedNamed", { name: response.flow_name })
+          : t("formSubmitted")}
+      </span>
+      {entries.length === 0 ? (
+        <p className="text-sm italic opacity-80">{t("formEmpty")}</p>
+      ) : (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+          {entries.map(([key, value]) => (
+            <div key={key} className="contents">
+              <dt className="text-muted-foreground">{humanizeFieldName(key)}</dt>
+              <dd className="whitespace-pre-wrap break-words">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
 }
 
 export function MessageBubble({
