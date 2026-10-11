@@ -80,6 +80,21 @@ const SCREEN_ID_RE = /^[A-Za-z][A-Za-z_]*$/
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 const REF_RE = /\$\{(form|data)\.([A-Za-z0-9_]+)\}/g
 const MAX_COMPONENTS_PER_SCREEN = 50
+const WHOLE_REF_RE = /^\$\{(form|data)\.([A-Za-z0-9_]+)\}$/
+
+/**
+ * The runtime type an input's value has. Every text-ish input yields a
+ * string — a TextInput with "input-type": "number" included — so a
+ * `data` key declared "number" for it fails on the phone ("Something
+ * went wrong") although Meta's validator accepts the definition.
+ */
+function inputValueType(componentType: string): string {
+  if (componentType === 'OptIn') return 'boolean'
+  if (['CheckboxGroup', 'ChipsSelector', 'PhotoPicker', 'DocumentPicker'].includes(componentType)) {
+    return 'array'
+  }
+  return 'string'
+}
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -95,8 +110,10 @@ interface ScreenFacts {
   id: string
   index: number
   terminal: boolean
-  inputs: Set<string>
-  declaredData: Set<string>
+  /** Input name → component type. */
+  inputs: Map<string, string>
+  /** Declared `data` key → its declared type. */
+  declaredData: Map<string, unknown>
   footers: number
   actions: Action[]
   refs: { kind: 'form' | 'data'; key: string; path: string }[]
@@ -202,7 +219,7 @@ function walkComponents(
           message: `Duplicate input name "${name}" on screen ${facts.id}.`,
         })
       } else {
-        facts.inputs.add(name)
+        facts.inputs.set(name, type)
       }
       if (type !== 'OptIn' && (typeof child.label !== 'string' || !child.label.trim())) {
         issues.push({ severity: 'error', path: `${p}.label`, message: `${type} needs a "label".` })
@@ -324,8 +341,8 @@ export function lintFlowJson(flowJson: unknown): FlowLintIssue[] {
       id,
       index,
       terminal: raw.terminal === true,
-      inputs: new Set(),
-      declaredData: new Set(),
+      inputs: new Map(),
+      declaredData: new Map(),
       footers: 0,
       actions: [],
       refs: [],
@@ -337,7 +354,7 @@ export function lintFlowJson(flowJson: unknown): FlowLintIssue[] {
         issues.push({ severity: 'error', path: `${path}.data`, message: 'Screen "data" must be an object.' })
       } else {
         for (const [key, decl] of Object.entries(raw.data)) {
-          screen.declaredData.add(key)
+          screen.declaredData.set(key, isObj(decl) ? decl.type : undefined)
           if (!isObj(decl) || typeof decl.type !== 'string' || !('__example__' in decl)) {
             issues.push({
               severity: 'error',
@@ -424,6 +441,23 @@ export function lintFlowJson(flowJson: unknown): FlowLintIssue[] {
                 severity: 'error',
                 path: `${action.path}.payload.${key}`,
                 message: `Passes "${key}" to ${target.id}, which doesn't declare it in its "data".`,
+              })
+              continue
+            }
+            const declared = target.declaredData.get(key)
+            const ref = String(action.payload?.[key] ?? '').match(WHOLE_REF_RE)
+            const sent = !ref
+              ? undefined
+              : ref[1] === 'form'
+                ? screen.inputs.has(ref[2])
+                  ? inputValueType(screen.inputs.get(ref[2])!)
+                  : undefined
+                : screen.declaredData.get(ref[2])
+            if (typeof declared === 'string' && typeof sent === 'string' && declared !== sent) {
+              issues.push({
+                severity: 'error',
+                path: `screens[${target.index}].data.${key}`,
+                message: `${target.id} declares "${key}" as "${declared}", but ${screen.id} sends a ${sent}. Declare it "${sent}" — the form fails on the phone otherwise.`,
               })
             }
           }

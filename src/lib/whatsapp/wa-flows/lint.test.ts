@@ -104,6 +104,49 @@ describe('lintFlowJson', () => {
     );
   });
 
+  it('flags data types that disagree with what the payload sends', () => {
+    const input = (name: string, extra: Record<string, unknown> = {}) => ({
+      type: 'TextInput',
+      name,
+      label: name,
+      ...extra,
+    });
+    const out = lintFlowJson(
+      flow(
+        screen({
+          id: 'A',
+          layout: {
+            type: 'SingleColumnLayout',
+            children: [
+              input('bvn', { 'input-type': 'number' }),
+              { type: 'OptIn', name: 'ok', label: 'I agree' },
+              navigate('B', { bvn: '${form.bvn}', ok: '${form.ok}', note: 'literal' }),
+            ],
+          },
+        }),
+        screen({
+          id: 'B',
+          data: {
+            bvn: { type: 'number', __example__: 1 },
+            ok: { type: 'boolean', __example__: true },
+            note: { type: 'number', __example__: 1 },
+          },
+          layout: { type: 'SingleColumnLayout', children: [navigate('C', { bvn: '${data.bvn}' })] },
+        }),
+        screen({
+          id: 'C',
+          terminal: true,
+          data: { bvn: { type: 'string', __example__: '1' } },
+          layout: { type: 'SingleColumnLayout', children: [complete({ bvn: '${data.bvn}' })] },
+        }),
+      ),
+    );
+    expect(lintErrors(out).map((i) => [i.path, i.message])).toEqual([
+      ['screens[1].data.bvn', expect.stringMatching(/B declares "bvn" as "number", but A sends a string/)],
+      ['screens[2].data.bvn', expect.stringMatching(/C declares "bvn" as "string", but B sends a number/)],
+    ]);
+  });
+
   it('flags dangling ${form.x} / ${data.x} references', () => {
     const out = messages(
       flow(

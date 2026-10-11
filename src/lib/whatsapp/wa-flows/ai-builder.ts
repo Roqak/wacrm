@@ -59,7 +59,7 @@ ACTIONS
   {"name": "navigate", "next": {"type": "screen", "name": "NEXT_ID"}, "payload": {"email": "\${form.email}"}}
   The NEXT screen must declare each payload key in its "data":
   "data": {"email": {"type": "string", "__example__": "ada@example.com"}}
-  (types: "string", "number", "boolean", "array" — an array also needs "items": {"type": "string"}; CheckboxGroup answers are arrays.)
+  The declared type must match what the input yields: OptIn → "boolean", CheckboxGroup → "array" with "items": {"type": "string"}, every other input → "string" — a TextInput with "input-type": "number" still yields a string, so never declare "number" for it. A wrong type makes the form fail on the phone.
 - Finish the form (terminal screen only):
   {"name": "complete", "payload": { ...EVERY answer from EVERY screen... }}
   On the terminal screen, answers from earlier screens are "\${data.<key>}" (declared in its "data"); answers on this screen are "\${form.<name>}".
