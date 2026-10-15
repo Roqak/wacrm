@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   INTERACTIVE_LIMITS,
+  resolveMetaAppId,
   sendInteractiveButtons,
   sendInteractiveList,
 } from "./meta-api";
@@ -265,5 +266,51 @@ describe("sendInteractiveList — validation", () => {
         },
       },
     });
+  });
+});
+
+describe("resolveMetaAppId", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns the id of the app that owns the token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ name: "Deployment app", id: "12345" }), {
+          status: 200,
+        }),
+      ),
+    );
+    await expect(resolveMetaAppId("tok")).resolves.toBe("12345");
+  });
+
+  it("returns null on a non-ok response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 401 })),
+    );
+    await expect(resolveMetaAppId("tok")).resolves.toBeNull();
+  });
+
+  it("returns null when the response carries no id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "oops" } }), { status: 200 }),
+      ),
+    );
+    await expect(resolveMetaAppId("tok")).resolves.toBeNull();
+  });
+
+  it("returns null when the network call throws", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }),
+    );
+    await expect(resolveMetaAppId("tok")).resolves.toBeNull();
   });
 });

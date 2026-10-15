@@ -31,7 +31,7 @@ import {
   type TemplatePayload,
 } from '@/lib/whatsapp/template-validators'
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
-import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
+import { ensureMediaHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 
 export class TemplateLifecycleError extends Error {
@@ -235,10 +235,10 @@ export async function submitTemplate(
     // plain URL at creation). Derive it from header_media_url before
     // building the payload.
     try {
-      await ensureImageHeaderHandle(payload, accessToken)
+      await ensureMediaHeaderHandle(payload, accessToken)
     } catch (e) {
       throw new TemplateLifecycleError(
-        e instanceof Error ? e.message : 'Header image upload failed.',
+        e instanceof Error ? e.message : 'Media-header upload failed.',
       )
     }
 
@@ -362,10 +362,10 @@ export async function editTemplate(
     // Image headers need a fresh Resumable-Upload handle on every edit
     // (Meta replaces components wholesale). Derive from header_media_url.
     try {
-      await ensureImageHeaderHandle(payload, accessToken)
+      await ensureMediaHeaderHandle(payload, accessToken)
     } catch (e) {
       throw new TemplateLifecycleError(
-        e instanceof Error ? e.message : 'Header image upload failed.',
+        e instanceof Error ? e.message : 'Media-header upload failed.',
       )
     }
 

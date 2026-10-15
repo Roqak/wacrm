@@ -234,7 +234,23 @@ and logo instead of this one's.
   > only if the AI form builder is used — `051_ai_form_builder_usage.sql`
   > (adds the usage rows it logs).
 
+- **Video and document template headers.** Template headers beyond
+  images used to require a manually-pasted Resumable Upload handle.
+  The auto-upload that image headers already had (fetch
+  `header_media_url`, SSRF-guarded; upload; store the handle) now
+  covers video (MP4/3GP, ≤ 25 MB) and document (PDF, Office, TXT,
+  ≤ 100 MB) headers too.
+
 ### Fixed
+
+- **Image-header templates no longer hard-require `META_APP_ID`.**
+  The Resumable-Upload session that uploads a template's header sample
+  is keyed on the app that owns the account's access token, and one
+  deployment-wide variable can't match every token in a multi-business
+  setup (tokens from different Meta apps — the same split webhook
+  signature verification already handles). wacrm now reads the app id
+  from the token itself (`GET /app`); `META_APP_ID` is only the
+  fallback for when Graph can't answer.
 
 - **Reply quotes credited the wrong person.** Quoting any outbound
   message showed a bare "(me)" regardless of who had actually sent it,

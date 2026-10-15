@@ -583,6 +583,38 @@ export async function uploadResumableMedia(
   return { handle: uploadData.h }
 }
 
+// ------------------------------------------------------------
+// App id of an access token
+// ------------------------------------------------------------
+
+/**
+ * The id of the Meta App that owns/issued the given access token, or
+ * null when Graph won't tell us (invalid / expired token, network or
+ * API failure).
+ *
+ * The Resumable Upload session for template media headers is keyed on
+ * `/{app_id}/uploads`, and Meta requires that app to be the one the
+ * token belongs to — a deployment-wide `META_APP_ID` breaks accounts
+ * whose numbers are served by a different Meta app (the same split
+ * migration 048 handled for webhook signatures). `GET /app` answers
+ * with the token's own app, which is always the right one for the
+ * matching token.
+ */
+export async function resolveMetaAppId(
+  accessToken: string,
+): Promise<string | null> {
+  try {
+    const res = await metaFetch(
+      `${META_API_BASE}/app?fields=id&access_token=${encodeURIComponent(accessToken)}`,
+    )
+    if (!res.ok) return null
+    const data = (await res.json()) as { id?: unknown }
+    return typeof data.id === 'string' && data.id.length > 0 ? data.id : null
+  } catch {
+    return null
+  }
+}
+
 // ============================================================
 // Template submission (Business Management API)
 // ============================================================
