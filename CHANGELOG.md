@@ -241,6 +241,16 @@ and logo instead of this one's.
   covers video (MP4/3GP, ≤ 25 MB) and document (PDF, Office, TXT,
   ≤ 100 MB) headers too.
 
+- **Webhooks settings section.** Outgoing webhook endpoints (migration
+  028's `webhook_endpoints`) were manage-only through the public API —
+  you needed an API key just to register a sink. Settings gains a
+  Webhooks section (admin-gated writes; roster visible to any member)
+  driving new session-auth routes (`GET/POST /api/webhook-endpoints`,
+  `PATCH/DELETE /api/webhook-endpoints/{id}`) over the same
+  validation, serialization and one-time secret reveal the
+  `webhooks:manage` API scope uses. The signing secret is shown once
+  at creation, like API keys; endpoint URLs must be https://.
+
 ### Fixed
 
 - **Image-header templates no longer hard-require `META_APP_ID`.**

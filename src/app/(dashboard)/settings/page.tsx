@@ -12,6 +12,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { WebhookEndpointsManager } from '@/components/settings/webhook-endpoints-manager';
 import { WebhookEventsPanel } from '@/components/settings/webhook-events-panel';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { FormsManager } from '@/components/settings/forms/forms-manager';
@@ -77,6 +78,7 @@ function SettingsPageInner() {
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
+    webhooks: <WebhookEndpointsManager />,
     'webhook-events': <WebhookEventsPanel />,
     templates: <TemplateManager />,
     forms: <FormsManager />,
