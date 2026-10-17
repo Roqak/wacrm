@@ -166,6 +166,15 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         filename: "",
         next_node_key: "",
       };
+    case "send_form":
+      return {
+        flow_id: "",
+        flow_name: "",
+        text: "",
+        cta: "Open form",
+        var_prefix: "form",
+        next_node_key: "",
+      };
     case "collect_input":
       return {
         prompt_text: "",

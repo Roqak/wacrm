@@ -10,7 +10,37 @@
  */
 
 const META_API_VERSION = 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+/** Exported for sibling Meta clients (e.g. `wa-flows/api.ts`). */
+export const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+
+// Graph API answers within seconds normally; a call with no timeout can
+// hang for minutes (dead egress, DNS black hole) on a route that also
+// acks webhooks and rides proxy/CF timeouts — seen as Cloudflare 502
+// HTML reaching the browser during a template submit. 20s is generous
+// for every call here except media download, which streams files up to
+// the 16 MB cap.
+const META_CALL_TIMEOUT_MS = 20_000
+const META_DOWNLOAD_TIMEOUT_MS = 60_000
+
+export async function metaFetch(
+  url: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<Response> {
+  const { timeoutMs, ...rest } = init ?? {}
+  const ms = timeoutMs ?? META_CALL_TIMEOUT_MS
+  try {
+    return await fetch(url, { ...rest, signal: AbortSignal.timeout(ms) })
+  } catch (e) {
+    // AbortSignal.timeout surfaces as `TimeoutError` — say what hung and
+    // for how long instead of a bare DOMException message.
+    if (e instanceof Error && e.name === 'TimeoutError') {
+      throw new Error(
+        `Meta API call timed out after ${ms / 1000}s (${new URL(url).origin})`,
+      )
+    }
+    throw e
+  }
+}
 
 export interface MetaSendResult {
   messageId: string
@@ -24,14 +54,45 @@ export interface MetaPhoneInfo {
 }
 
 interface MetaErrorResponse {
-  error?: { message?: string; code?: number; type?: string }
+  error?: {
+    message?: string;
+    code?: number;
+    type?: string;
+    /** Present on Graph API field-level rejections (e.g. "Invalid
+     *  parameter" templates carry the actionable text here:
+     *  "sample body text is not provided but is required"). */
+    error_data?: { details?: string };
+    error_subcode?: number;
+    /** Human-readable explanation Meta attaches to many rejections —
+     *  e.g. subcode 2388024 says *why* "Invalid parameter" (a template
+     *  with this name and language already exists). */
+    error_user_title?: string;
+    error_user_msg?: string;
+  }
 }
 
-async function throwMetaError(response: Response, fallback: string): Promise<never> {
+export async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
   try {
     const data = (await response.json()) as MetaErrorResponse
-    if (data.error?.message) message = data.error.message
+    const err = data.error
+    const parts: string[] = []
+    if (err?.message) parts.push(err.message)
+    // "Invalid parameter" alone tells the integrator nothing — Meta's
+    // field-level detail is the actual diagnosis ("sample body text is
+    // not provided…"). Include it, plus the subcode for error-report
+    // lookups.
+    if (err?.error_data?.details) parts.push(err.error_data.details)
+    if (err?.error_user_msg) {
+      parts.push(
+        err.error_user_title
+          ? `${err.error_user_title}: ${err.error_user_msg}`
+          : err.error_user_msg,
+      )
+    }
+    if (parts.length > 0) message = parts.join(' — ')
+    if (err?.error_subcode) message += ` (subcode ${err.error_subcode})`
+    if (err?.code) message += ` (code ${err.code})`
   } catch {
     // response body wasn't JSON — keep the fallback
   }
@@ -56,7 +117,7 @@ export async function verifyPhoneNumber(
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
   const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!response.ok) {
@@ -125,7 +186,7 @@ export async function registerPhoneNumber(
 ): Promise<RegisterPhoneNumberResult> {
   const { phoneNumberId, accessToken, pin } = args
   const url = `${META_API_BASE}/${phoneNumberId}/register`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -169,7 +230,7 @@ export async function subscribeWabaToApp(
 ): Promise<void> {
   const { wabaId, accessToken } = args
   const url = `${META_API_BASE}/${wabaId}/subscribed_apps`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -201,7 +262,7 @@ export async function getSubscribedApps(
 ): Promise<SubscribedApp[]> {
   const { wabaId, accessToken } = args
   const url = `${META_API_BASE}/${wabaId}/subscribed_apps`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!response.ok) {
@@ -244,7 +305,7 @@ export async function sendTextMessage(
   if (contextMessageId) {
     body.context = { message_id: contextMessageId }
   }
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -310,7 +371,7 @@ export async function sendMediaMessage(
   }
   if (contextMessageId) body.context = { message_id: contextMessageId }
 
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -403,6 +464,8 @@ export async function sendTemplateMessage(
       headerMediaUrl: messageParams?.headerMediaUrl,
       headerMediaId: messageParams?.headerMediaId,
       buttonParams: messageParams?.buttonParams,
+      flowToken: messageParams?.flowToken,
+      flowActionData: messageParams?.flowActionData,
     })
     if (components.length > 0) {
       templatePayload.components = components
@@ -428,7 +491,7 @@ export async function sendTemplateMessage(
     body.context = { message_id: contextMessageId }
   }
 
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -486,7 +549,7 @@ export async function uploadResumableMedia(
     file_type: mimeType,
     access_token: accessToken,
   })
-  const startRes = await fetch(
+  const startRes = await metaFetch(
     `${META_API_BASE}/${appId}/uploads?${startParams.toString()}`,
     { method: 'POST' },
   )
@@ -500,7 +563,7 @@ export async function uploadResumableMedia(
 
   // Step 2 — upload the bytes. Note the `OAuth` auth scheme (not Bearer)
   // and the file_offset header, both required by this endpoint.
-  const uploadRes = await fetch(`${META_API_BASE}/${startData.id}`, {
+  const uploadRes = await metaFetch(`${META_API_BASE}/${startData.id}`, {
     method: 'POST',
     headers: {
       Authorization: `OAuth ${accessToken}`,
@@ -518,6 +581,38 @@ export async function uploadResumableMedia(
     throw new Error('Resumable upload did not return a file handle.')
   }
   return { handle: uploadData.h }
+}
+
+// ------------------------------------------------------------
+// App id of an access token
+// ------------------------------------------------------------
+
+/**
+ * The id of the Meta App that owns/issued the given access token, or
+ * null when Graph won't tell us (invalid / expired token, network or
+ * API failure).
+ *
+ * The Resumable Upload session for template media headers is keyed on
+ * `/{app_id}/uploads`, and Meta requires that app to be the one the
+ * token belongs to — a deployment-wide `META_APP_ID` breaks accounts
+ * whose numbers are served by a different Meta app (the same split
+ * migration 048 handled for webhook signatures). `GET /app` answers
+ * with the token's own app, which is always the right one for the
+ * matching token.
+ */
+export async function resolveMetaAppId(
+  accessToken: string,
+): Promise<string | null> {
+  try {
+    const res = await metaFetch(
+      `${META_API_BASE}/app?fields=id&access_token=${encodeURIComponent(accessToken)}`,
+    )
+    if (!res.ok) return null
+    const data = (await res.json()) as { id?: unknown }
+    return typeof data.id === 'string' && data.id.length > 0 ? data.id : null
+  } catch {
+    return null
+  }
 }
 
 // ============================================================
@@ -556,7 +651,7 @@ export async function submitMessageTemplate(
 ): Promise<SubmitMessageTemplateResult> {
   const { wabaId, accessToken, payload } = args
   const url = `${META_API_BASE}/${wabaId}/message_templates`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -608,7 +703,7 @@ export async function editMessageTemplate(
   const { metaTemplateId, accessToken, components, category } = args
   const body: Record<string, unknown> = { components }
   if (category) body.category = category
-  const response = await fetch(`${META_API_BASE}/${metaTemplateId}`, {
+  const response = await metaFetch(`${META_API_BASE}/${metaTemplateId}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -647,7 +742,7 @@ export async function deleteMessageTemplate(
   const params = new URLSearchParams({ name })
   if (metaTemplateId) params.set('hsm_id', metaTemplateId)
   const url = `${META_API_BASE}/${wabaId}/message_templates?${params.toString()}`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -682,7 +777,7 @@ export async function sendReactionMessage(
 ): Promise<MetaSendResult> {
   const { phoneNumberId, accessToken, to, targetMessageId, emoji } = args
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -730,6 +825,7 @@ export const INTERACTIVE_LIMITS = {
   bodyMaxLength: 1024,
   footerMaxLength: 60,
   headerTextMaxLength: 60,
+  flowCtaMaxLength: 20,
 } as const
 
 export interface InteractiveButton {
@@ -818,7 +914,7 @@ export async function sendInteractiveButtons(
   if (contextMessageId) body.context = { message_id: contextMessageId }
 
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -950,7 +1046,7 @@ export async function sendInteractiveList(
   if (contextMessageId) body.context = { message_id: contextMessageId }
 
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
-  const response = await fetch(url, {
+  const response = await metaFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -963,6 +1059,110 @@ export async function sendInteractiveList(
   }
   const data = await response.json()
   return { messageId: data.messages[0].id }
+}
+
+export interface SendInteractiveFlowArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  headerText?: string
+  footerText?: string
+  /** Meta's flow id. */
+  flowId: string
+  /** Label of the button that opens the form (≤ 20 chars). */
+  flowCta: string
+  /** Opaque id Meta echoes back on the submission + endpoint calls. */
+  flowToken: string
+  /** Default `navigate`. */
+  flowAction?: 'navigate' | 'data_exchange'
+  /** Screen to open — required by Meta for `navigate`. */
+  screen?: string
+  /** Initial data for the opening screen (`navigate` only). */
+  data?: Record<string, unknown>
+  /** `draft` sends an unpublished flow (testing). */
+  mode?: 'draft' | 'published'
+  contextMessageId?: string
+}
+
+/**
+ * Send a WhatsApp Flow ("WhatsApp Form") as an interactive message. The
+ * customer taps the CTA, fills the form natively, and Meta delivers a
+ * webhook with `messages[0].interactive.type === 'nfm_reply'` whose
+ * `response_json` carries the fields plus our `flow_token`.
+ *
+ * Only valid inside the 24h customer-service window — outside it, a
+ * form goes out as a template with a FLOW button instead.
+ *
+ *   https://developers.facebook.com/docs/whatsapp/flows/guides/sendingaflow
+ */
+export async function sendInteractiveFlow(
+  args: SendInteractiveFlowArgs
+): Promise<MetaSendResult> {
+  const {
+    phoneNumberId, accessToken, to,
+    bodyText, headerText, footerText,
+    flowId, flowCta, flowToken, flowAction = 'navigate', screen, data, mode,
+    contextMessageId,
+  } = args
+  validateInteractiveBody(bodyText)
+  validateInteractiveHeaderFooter(headerText, footerText)
+  if (!flowId) throw new Error('Flow message requires a flow id.')
+  if (!flowToken) throw new Error('Flow message requires a flow token.')
+  if (!flowCta) throw new Error('Flow message requires a button label.')
+  if (flowCta.length > INTERACTIVE_LIMITS.flowCtaMaxLength) {
+    throw new Error(
+      `Flow button label "${flowCta}" exceeds ${INTERACTIVE_LIMITS.flowCtaMaxLength} chars.`
+    )
+  }
+  if (flowAction === 'navigate' && !screen) {
+    throw new Error('A "navigate" flow message requires the screen to open.')
+  }
+
+  const parameters: Record<string, unknown> = {
+    flow_message_version: '3',
+    flow_token: flowToken,
+    flow_id: flowId,
+    flow_cta: flowCta,
+    flow_action: flowAction,
+  }
+  if (mode === 'draft') parameters.mode = 'draft'
+  if (flowAction === 'navigate') {
+    const actionPayload: Record<string, unknown> = { screen }
+    if (data && Object.keys(data).length > 0) actionPayload.data = data
+    parameters.flow_action_payload = actionPayload
+  }
+
+  const interactive: Record<string, unknown> = {
+    type: 'flow',
+    body: { text: bodyText },
+    action: { name: 'flow', parameters },
+  }
+  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (footerText) interactive.footer = { text: footerText }
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive,
+  }
+  if (contextMessageId) body.context = { message_id: contextMessageId }
+
+  const response = await metaFetch(`${META_API_BASE}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const result = await response.json()
+  return { messageId: result.messages[0].id }
 }
 
 function validateInteractiveBody(bodyText: string): void {
@@ -1013,7 +1213,7 @@ export async function getMediaUrl(
   args: GetMediaUrlArgs
 ): Promise<{ url: string; mimeType: string; fileSize: number | null }> {
   const { mediaId, accessToken } = args
-  const response = await fetch(`${META_API_BASE}/${mediaId}`, {
+  const response = await metaFetch(`${META_API_BASE}/${mediaId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!response.ok) {
@@ -1044,8 +1244,10 @@ export async function downloadMedia(
   args: DownloadMediaArgs
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const { downloadUrl, accessToken } = args
-  const response = await fetch(downloadUrl, {
+  const response = await metaFetch(downloadUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    // Streaming up to 16 MB — the 20s API timeout is too tight here.
+    timeoutMs: META_DOWNLOAD_TIMEOUT_MS,
   })
   if (!response.ok) {
     throw new Error(`Media download failed: ${response.status}`)

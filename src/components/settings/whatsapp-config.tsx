@@ -74,6 +74,7 @@ export function WhatsAppConfig() {
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [verifyToken, setVerifyToken] = useState('');
+  const [appSecret, setAppSecret] = useState('');
   const [pin, setPin] = useState('');
   const [tokenEdited, setTokenEdited] = useState(false);
 
@@ -136,6 +137,7 @@ export function WhatsAppConfig() {
         setWabaId(data.waba_id || '');
         setAccessToken(MASKED_TOKEN);
         setVerifyToken('');
+        setAppSecret('');
         setPin('');
         setTokenEdited(false);
         // Undefined on a row read before migration 039 — treat that as
@@ -147,6 +149,7 @@ export function WhatsAppConfig() {
         setWabaId('');
         setAccessToken('');
         setVerifyToken('');
+        setAppSecret('');
         setPin('');
         setTokenEdited(false);
         setMirrorMedia(true);
@@ -251,6 +254,10 @@ export function WhatsAppConfig() {
         // requires it on first save or when changing numbers; for a
         // simple token rotation, leaving it blank skips re-register.
         pin: pin.trim() || null,
+        // Optional per-account Meta App Secret (needed only when this
+        // number is delivered by a Meta app other than the
+        // deployment's). Blank → server keeps the stored value.
+        meta_app_secret: appSecret.trim() || null,
       };
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
@@ -308,8 +315,9 @@ export function WhatsAppConfig() {
         );
         // Clear the PIN so subsequent saves don't accidentally
         // re-register (which would void the active subscription if
-        // the PIN became stale).
+        // the PIN became stale). Same for one-shot form fields.
         setPin('');
+        setAppSecret('');
       }
 
       if (accountId) await fetchConfig(accountId);
@@ -671,6 +679,22 @@ export function WhatsAppConfig() {
               />
               <p className="text-xs text-muted-foreground">
                 {t('webhookVerifyTokenHint')}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">
+                {t('appSecretLabel')}
+                <span className="ml-1 text-muted-foreground">{t('optional')}</span>
+              </Label>
+              <Input
+                placeholder={t('appSecretPlaceholder')}
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value.trim())}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground font-mono"
+              />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {t('appSecretHint')}
               </p>
             </div>
 

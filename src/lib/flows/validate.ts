@@ -301,6 +301,58 @@ function validateNode(
       break;
     }
 
+    case "send_form": {
+      const cfg = node.config as {
+        flow_id?: string;
+        text?: string;
+        cta?: string;
+        var_prefix?: string;
+        next_node_key?: string;
+      };
+      const push = (field: string, message: string) =>
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field,
+          message,
+        });
+      if (!cfg.flow_id?.trim()) {
+        push("flow_id", "Send-form node needs a form to send.");
+      }
+      if (!cfg.text?.trim()) {
+        push("text", "Send-form node needs body text above the button.");
+      } else if (cfg.text.length > INTERACTIVE_LIMITS.bodyMaxLength) {
+        push(
+          "text",
+          `Send-form body exceeds ${INTERACTIVE_LIMITS.bodyMaxLength} chars.`,
+        );
+      }
+      if (!cfg.cta?.trim()) {
+        push("cta", "Send-form node needs a button label.");
+      } else if (cfg.cta.length > INTERACTIVE_LIMITS.flowCtaMaxLength) {
+        push(
+          "cta",
+          `Form button label exceeds ${INTERACTIVE_LIMITS.flowCtaMaxLength} chars (Meta limit).`,
+        );
+      }
+      if (cfg.var_prefix && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(cfg.var_prefix)) {
+        push(
+          "var_prefix",
+          "Variable prefix must start with a letter or underscore and contain only letters, digits and underscores.",
+        );
+      }
+      if (!cfg.next_node_key) {
+        push("next_node_key", "Send-form node must point to a next node.");
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        push(
+          "next_node_key",
+          `Send-form points to non-existent node "${cfg.next_node_key}".`,
+        );
+      }
+      break;
+    }
+
     case "send_buttons": {
       const cfg = node.config as {
         text?: string;
@@ -750,6 +802,7 @@ function outgoingEdges(node: NodeInput): string[] {
     case "start":
     case "send_message":
     case "send_media":
+    case "send_form":
     case "collect_input":
     case "set_tag": {
       const cfg = node.config as { next_node_key?: string };

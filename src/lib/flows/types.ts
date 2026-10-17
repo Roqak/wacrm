@@ -97,6 +97,36 @@ export interface SendMediaNodeConfig {
   next_node_key: string;
 }
 
+/**
+ * Sends a WhatsApp Form (Meta Flow) and suspends until the customer
+ * submits it. The submitted fields land in `flow_runs.vars` as
+ * `<var_prefix>_<field>` (or bare `<field>` without a prefix), so later
+ * nodes can branch on them (`condition` over `var`) and interpolate
+ * them (`{{vars.signup_email}}`).
+ *
+ * The run is resumed by the submission's flow_token, which the engine
+ * records with the run id at send time; text typed while the form is
+ * open goes through the fallback policy like any unmatched reply.
+ */
+export interface SendFormNodeConfig {
+  /** Meta's flow id of the form to send. */
+  flow_id: string;
+  /** Form name — display only (canvas card, logs). */
+  flow_name?: string;
+  /** Body text above the button; can interpolate {{vars.X}}. */
+  text: string;
+  /** Label of the button that opens the form (≤ 20 chars). */
+  cta: string;
+  header_text?: string;
+  footer_text?: string;
+  /** Override the opening screen (default: the form's first screen). */
+  screen?: string;
+  /** Namespace for captured fields. Empty → bare field names. */
+  var_prefix?: string;
+  /** Node to advance to once the form is submitted. */
+  next_node_key: string;
+}
+
 export interface HandoffNodeConfig {
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
@@ -190,6 +220,7 @@ export type FlowNodeConfig =
   | { node_type: "send_buttons"; config: SendButtonsNodeConfig }
   | { node_type: "send_list"; config: SendListNodeConfig }
   | { node_type: "send_media"; config: SendMediaNodeConfig }
+  | { node_type: "send_form"; config: SendFormNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
@@ -326,6 +357,18 @@ export type ParsedInbound =
       reply_id: string;
       /** The visible title of the tapped option (for logging). */
       reply_title: string;
+      meta_message_id: string;
+    }
+  | {
+      /** A completed WhatsApp Form (Meta Flow `nfm_reply`). */
+      kind: "form_reply";
+      /** Our token, when the submission carried one we recognise. */
+      flow_token: string | null;
+      /** Run that sent the form (token issued by a send_form node). */
+      flow_run_id: string | null;
+      meta_flow_id: string | null;
+      /** Submitted fields (flow_token removed). */
+      fields: Record<string, unknown>;
       meta_message_id: string;
     };
 

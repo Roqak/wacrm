@@ -93,6 +93,7 @@ export function AiConfig() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
@@ -125,6 +126,7 @@ export function AiConfig() {
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
+        setSuggestionsEnabled(Boolean(data.suggestions_enabled));
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHasStoredKey(Boolean(data.has_key));
@@ -191,6 +193,7 @@ export function AiConfig() {
     system_prompt: systemPrompt.trim() || null,
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
+    suggestions_enabled: suggestionsEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
   });
@@ -506,6 +509,26 @@ export function AiConfig() {
               <Switch
                 checked={autoReplyEnabled}
                 onCheckedChange={setAutoReplyEnabled}
+                disabled={disabled || !isActive}
+              />
+            </div>
+
+            {/* Suggestions sit between "draft on demand" and "reply on
+                its own": nobody clicks to start them, but nothing goes
+                out without an agent. Off by default for the same reason
+                auto-reply is — it spends the key unprompted. */}
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('suggestions')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('suggestionsDesc')}
+                </p>
+              </div>
+              <Switch
+                checked={suggestionsEnabled}
+                onCheckedChange={setSuggestionsEnabled}
                 disabled={disabled || !isActive}
               />
             </div>

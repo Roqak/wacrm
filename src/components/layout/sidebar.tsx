@@ -113,6 +113,7 @@ interface SidebarProps {
 
 import { useTranslations } from "next-intl";
 import { displayBrandName } from "@/lib/branding";
+import { AccountSwitcher } from "./account-switcher";
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
@@ -316,6 +317,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
         {/* User section */}
         <div className="shrink-0 border-t border-border p-3">
+          {/* Business switcher. Renders nothing unless this person
+              belongs to more than one. */}
+          <AccountSwitcher />
           {/* Account name display — surfaced only when the account
               name differs from the user's own name (see
               `showAccountStrip`). For a default solo account the two

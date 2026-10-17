@@ -697,6 +697,7 @@ const ADD_NODE_TYPES: NodeType[] = [
   'send_list',
   'send_message',
   'send_media',
+  'send_form',
   'collect_input',
   'condition',
   'set_tag',

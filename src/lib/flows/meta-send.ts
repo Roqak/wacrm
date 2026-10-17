@@ -1,5 +1,6 @@
 import {
   sendInteractiveButtons,
+  sendInteractiveFlow,
   sendInteractiveList,
   sendMediaMessage,
   sendTextMessage,
@@ -7,7 +8,14 @@ import {
   type InteractiveListSection,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api'
-import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
+import type {
+  InteractiveFlowPayload,
+  InteractiveMessagePayload,
+} from '@/lib/whatsapp/interactive'
+import {
+  prepareFlowPayload,
+  recordFlowToken,
+} from '@/lib/whatsapp/wa-flows/send'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   sanitizePhoneForMeta,
@@ -458,4 +466,145 @@ async function sendInteractiveViaMeta(
     .eq('id', input.conversationId)
 
   return { whatsapp_message_id: waMessageId }
+}
+
+interface SendInteractiveFlowEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  payload: InteractiveFlowPayload
+  /** Which engine is sending — recorded on the flow token. */
+  source: 'automation' | 'chatbot'
+  /** Chatbot run to resume when the form is submitted. */
+  flowRunId?: string | null
+}
+
+/**
+ * Send a WhatsApp Form from the automation or chatbot engine.
+ *
+ * Same account-scoped lookups, phone-variant retry and `messages`
+ * persistence as the other engine senders, plus the flow-token
+ * bookkeeping: the token is recorded with the run id so the
+ * submission webhook can resume a suspended chatbot `send_form` node.
+ */
+export async function engineSendInteractiveFlow(
+  args: SendInteractiveFlowEngineArgs,
+): Promise<{ whatsapp_message_id: string; message_id: string | null }> {
+  const db = supabaseAdmin()
+
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone')
+    .eq('id', args.contactId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (contactErr || !contact?.phone) {
+    throw new Error('contact not found for this account')
+  }
+
+  const sanitized = sanitizePhoneForMeta(contact.phone)
+  if (!isValidE164(sanitized)) {
+    throw new Error(`contact phone invalid: ${contact.phone}`)
+  }
+
+  const { data: config, error: configErr } = await db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', args.accountId)
+    .single()
+  if (configErr || !config) {
+    throw new Error('WhatsApp not configured for this account')
+  }
+
+  const accessToken = decrypt(config.access_token)
+  const { payload, localFlow } = await prepareFlowPayload(db, {
+    accountId: args.accountId,
+    payload: args.payload,
+    accessToken,
+  })
+
+  const attempt = async (phone: string): Promise<string> => {
+    const r = await sendInteractiveFlow({
+      phoneNumberId: config.phone_number_id,
+      accessToken,
+      to: phone,
+      bodyText: payload.body,
+      headerText: payload.header || undefined,
+      footerText: payload.footer || undefined,
+      flowId: payload.flow_id,
+      flowCta: payload.cta,
+      flowToken: payload.flow_token!,
+      flowAction: payload.flow_action,
+      screen: payload.screen,
+      data: payload.data,
+      mode: payload.mode,
+    })
+    return r.messageId
+  }
+
+  const variants = phoneVariants(sanitized)
+  let workingPhone = sanitized
+  let waMessageId = ''
+  let lastError: unknown = null
+  for (const v of variants) {
+    try {
+      waMessageId = await attempt(v)
+      workingPhone = v
+      lastError = null
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!isRecipientNotAllowedError(msg)) throw err
+      lastError = err
+    }
+  }
+  if (lastError) throw lastError
+
+  if (workingPhone !== sanitized) {
+    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+  }
+
+  await recordFlowToken(db, {
+    token: payload.flow_token!,
+    accountId: args.accountId,
+    flowId: localFlow?.id ?? null,
+    metaFlowId: payload.flow_id,
+    contactId: contact.id,
+    conversationId: args.conversationId,
+    flowRunId: args.flowRunId ?? null,
+    source: args.source,
+    waMessageId,
+  })
+
+  const { data: inserted, error: msgErr } = await db
+    .from('messages')
+    .insert({
+      conversation_id: args.conversationId,
+      sender_type: 'bot',
+      content_type: 'interactive',
+      content_text: payload.body,
+      interactive_payload: payload,
+      message_id: waMessageId,
+      status: 'sent',
+    })
+    .select('id')
+    .maybeSingle()
+  if (msgErr) {
+    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: payload.body,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+
+  return {
+    whatsapp_message_id: waMessageId,
+    message_id: (inserted as { id: string } | null)?.id ?? null,
+  }
 }

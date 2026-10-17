@@ -550,3 +550,32 @@ describe("triggerMatches — keyword_match", () => {
     expect(on(automation({ keywords: ["hi"], match_type: "word" }), "")).toBe(false);
   });
 });
+
+describe("triggerMatches — form_submitted", () => {
+  function automation(flow_ids?: string[]): Automation {
+    return {
+      id: "a2",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "on form",
+      trigger_type: "form_submitted",
+      trigger_config: flow_ids ? { flow_ids } : {},
+      is_active: true,
+      execution_count: 0,
+      created_at: "",
+      updated_at: "",
+    };
+  }
+
+  it("matches any form when no forms are listed", () => {
+    expect(triggerMatches(automation(), { flow_id: "f-1" })).toBe(true);
+    expect(triggerMatches(automation([]), {})).toBe(true);
+  });
+
+  it("matches only the listed forms", () => {
+    expect(triggerMatches(automation(["f-1"]), { flow_id: "f-1" })).toBe(true);
+    expect(triggerMatches(automation(["f-1"]), { flow_id: "f-2" })).toBe(false);
+    // A form outside the catalog has no id — it can't match a filter.
+    expect(triggerMatches(automation(["f-1"]), {})).toBe(false);
+  });
+});

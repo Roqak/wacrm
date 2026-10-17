@@ -12,7 +12,7 @@ const DEFAULT_WINDOW_DAYS = 30
 
 interface UsageRow {
   created_at: string
-  mode: 'auto_reply' | 'draft'
+  mode: 'auto_reply' | 'draft' | 'suggestions' | 'form_builder'
   provider: string
   model: string
   prompt_tokens: number
@@ -101,9 +101,14 @@ export async function GET(request: Request) {
       completionTokens += r.completion_tokens
       totalTokens += r.total_tokens
 
-      // `mode` is DB-CHECK-constrained to these two values.
-      byMode[r.mode].calls += 1
-      byMode[r.mode].tokens += r.total_tokens
+      // Only the two charted modes get a per-mode tally; the others
+      // ('suggestions', 'form_builder') still count toward the totals,
+      // the daily series and the per-model breakdown.
+      const mode = byMode[r.mode as keyof typeof byMode]
+      if (mode) {
+        mode.calls += 1
+        mode.tokens += r.total_tokens
+      }
 
       const mk = `${r.provider}:${r.model}`
       const m =

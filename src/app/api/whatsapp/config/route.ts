@@ -185,13 +185,31 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { phone_number_id, waba_id, access_token, verify_token, pin, meta_app_secret } = body
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
         { error: 'access_token and phone_number_id are required' },
         { status: 400 }
       )
+    }
+
+    // Per-account Meta App Secret (migration 048) — only needed when
+    // THIS number is delivered by a Meta app other than the deployment's
+    // own. Empty/absent means "leave whatever is stored unchanged":
+    // the webhook reads the secret on every POST, and silently wiping
+    // it because the field was left blank on an unrelated re-save
+    // would drop the whole business's inbound traffic.
+    let metaAppSecret: string | undefined
+    if (typeof meta_app_secret === 'string' && meta_app_secret.trim() !== '') {
+      const trimmed = meta_app_secret.trim()
+      if (!/^[0-9a-f]{32}$/i.test(trimmed)) {
+        return NextResponse.json(
+          { error: 'A Meta App Secret is 32 hex characters (Meta → App Settings → Basic).' },
+          { status: 400 }
+        )
+      }
+      metaAppSecret = trimmed
     }
 
     if (pin !== undefined && pin !== null && pin !== '') {
@@ -274,7 +292,7 @@ export async function POST(request: Request) {
     // /register when the user didn't provide a PIN this time around.
     const { data: existing } = await supabase
       .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id')
+      .select('id, registered_at, phone_number_id, meta_app_secret')
       .eq('account_id', accountId)
       .maybeSingle()
 
@@ -352,8 +370,10 @@ export async function POST(request: Request) {
 
     // Persist everything in one shot. If /register failed we still
     // store the credentials and the error so the UI can guide the
-    // user through a retry.
-    const baseRow = {
+    // user through a retry. meta_app_secret is written only when the
+    // save supplied one — blank fields keep the stored value (see the
+    // comment above).
+    const baseRow: Record<string, unknown> = {
       phone_number_id,
       waba_id: waba_id || null,
       access_token: encryptedAccessToken,
@@ -364,6 +384,22 @@ export async function POST(request: Request) {
       subscribed_apps_at: subscribedAppsAt ?? null,
       last_registration_error: registrationError,
       updated_at: new Date().toISOString(),
+    }
+    if (metaAppSecret !== undefined) {
+      let encryptedSecret: string
+      try {
+        encryptedSecret = encrypt(metaAppSecret)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown encryption error'
+        console.error('App secret encryption failed:', message)
+        return NextResponse.json(
+          { error: 'Failed to encrypt the app secret. Check that ENCRYPTION_KEY is a valid 64-character hex string.' },
+          { status: 500 }
+        )
+      }
+      baseRow.meta_app_secret = encryptedSecret
+    } else if (!existing) {
+      baseRow.meta_app_secret = null
     }
 
     if (existing) {

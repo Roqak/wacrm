@@ -6,6 +6,8 @@ const h = vi.hoisted(() => ({
   dispatchInboundToFlows: vi.fn(),
   dispatchInboundToAiReply: vi.fn(),
   dispatchWebhookEvent: vi.fn(),
+  resolveFlowSubmission: vi.fn(),
+  recordFlowSubmission: vi.fn(),
   state: {
     // Result the message upsert's .select() resolves to. A genuine insert
     // returns the row; a replayed delivery conflicts and returns [].
@@ -183,7 +185,7 @@ vi.mock('@/lib/contacts/dedupe', () => ({
   isUniqueViolation: () => false,
 }))
 vi.mock('@/lib/whatsapp/webhook-signature', () => ({
-  verifyMetaWebhookSignature: () => true,
+  verifyWebhookSignature: () => true,
 }))
 vi.mock('@/lib/whatsapp/template-webhook', () => ({
   isTemplateWebhookField: () => false,
@@ -200,6 +202,10 @@ vi.mock('@/lib/ai/auto-reply', () => ({
 }))
 vi.mock('@/lib/webhooks/deliver', () => ({
   dispatchWebhookEvent: h.dispatchWebhookEvent,
+}))
+vi.mock('@/lib/whatsapp/wa-flows/submission', () => ({
+  resolveFlowSubmission: h.resolveFlowSubmission,
+  recordFlowSubmission: h.recordFlowSubmission,
 }))
 
 import { POST } from './route'
@@ -536,5 +542,102 @@ describe('inbound webhook: after() awaits automations (#368)', () => {
     // If the dispatches were fire-and-forget, completed would still be 0
     // here — the callback would have resolved before the timers fired.
     expect(h.state.automationCompleted).toBe(3)
+  })
+})
+
+describe('inbound webhook: WhatsApp Form submissions (nfm_reply)', () => {
+  const FORM_REPLY = {
+    id: 'wamid.FORM1',
+    from: '15551230000',
+    timestamp: '1700000000',
+    type: 'interactive',
+    context: { id: 'wamid.SENT' },
+    interactive: {
+      type: 'nfm_reply',
+      nfm_reply: {
+        name: 'flow',
+        body: 'Sent',
+        response_json: '{"flow_token":"wacrm_t","email":"ada@example.com"}',
+      },
+    },
+  }
+  const RESOLVED = {
+    token: null,
+    flowToken: 'wacrm_t',
+    flowId: 'form-1',
+    metaFlowId: 'meta-1',
+    flowName: 'Sign up',
+    fields: { email: 'ada@example.com' },
+    fieldMappings: [],
+    flowRunId: 'run-1',
+    summary: 'Form submitted: Sign up — Email: ada@example.com',
+    messageFlowResponse: {
+      flow_id: 'form-1',
+      meta_flow_id: 'meta-1',
+      flow_name: 'Sign up',
+      response: { email: 'ada@example.com' },
+    },
+  }
+
+  beforeEach(() => {
+    h.resolveFlowSubmission.mockResolvedValue(RESOLVED)
+    h.recordFlowSubmission.mockResolvedValue({ responseId: 'resp-1', mapped: [] })
+  })
+
+  it('stores the summary + fields on the message and records the submission once', async () => {
+    await runWebhook(FORM_REPLY)
+
+    expect(h.resolveFlowSubmission).toHaveBeenCalledWith(expect.anything(), {
+      accountId: 'acc-1',
+      conversationId: 'conv-1',
+      responseJson: FORM_REPLY.interactive.nfm_reply.response_json,
+      contextWamid: 'wamid.SENT',
+    })
+    expect(h.state.upsertCalls[0].row).toMatchObject({
+      content_type: 'interactive',
+      content_text: RESOLVED.summary,
+      flow_response: RESOLVED.messageFlowResponse,
+      interactive_reply_id: null,
+    })
+    expect(h.recordFlowSubmission).toHaveBeenCalledTimes(1)
+    expect(h.recordFlowSubmission.mock.calls[0][1]).toMatchObject({
+      accountId: 'acc-1',
+      contactId: 'contact-1',
+      messageId: 'msg-1',
+      waMessageId: 'wamid.FORM1',
+    })
+  })
+
+  it('hands the chatbot a form_reply and fires form_submitted (not keyword_match, not AI)', async () => {
+    await runWebhook(FORM_REPLY)
+
+    expect(h.dispatchInboundToFlows.mock.calls[0][0].message).toEqual({
+      kind: 'form_reply',
+      flow_token: 'wacrm_t',
+      flow_run_id: 'run-1',
+      meta_flow_id: 'meta-1',
+      fields: { email: 'ada@example.com' },
+      meta_message_id: 'wamid.FORM1',
+    })
+    const triggers = h.runAutomationsForTrigger.mock.calls.map((c) => c[0].triggerType)
+    expect(triggers).toContain('form_submitted')
+    expect(triggers).not.toContain('keyword_match')
+    const formCall = h.runAutomationsForTrigger.mock.calls.find(
+      (c) => c[0].triggerType === 'form_submitted',
+    )![0]
+    expect(formCall.context).toMatchObject({
+      flow_id: 'form-1',
+      vars: { email: 'ada@example.com' },
+    })
+    expect(h.dispatchInboundToAiReply).not.toHaveBeenCalled()
+    const events = h.dispatchWebhookEvent.mock.calls.map((c) => c[2])
+    expect(events).toEqual(['message.received', 'form.submitted'])
+  })
+
+  it('a replayed submission records nothing', async () => {
+    h.state.messageUpsertResult = []
+    await runWebhook(FORM_REPLY)
+    expect(h.recordFlowSubmission).not.toHaveBeenCalled()
+    expect(h.runAutomationsForTrigger).not.toHaveBeenCalled()
   })
 })

@@ -27,11 +27,14 @@ export interface MetaComponent {
 }
 
 interface MetaButtonPayload {
-  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE';
+  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE' | 'FLOW';
   text: string;
   url?: string;
   phone_number?: string;
   example?: string[];
+  flow_id?: string;
+  flow_action?: 'navigate' | 'data_exchange';
+  navigate_screen?: string;
 }
 
 function buildHeaderComponent(payload: TemplatePayload): MetaComponent | null {
@@ -103,6 +106,19 @@ function buildButtonPayload(b: TemplateButton): MetaButtonPayload {
       return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phone_number };
     case 'COPY_CODE':
       return { type: 'COPY_CODE', text: b.text, example: [b.example] };
+    case 'FLOW': {
+      const action = b.flow_action ?? 'navigate';
+      const payload: MetaButtonPayload = {
+        type: 'FLOW',
+        text: b.text,
+        flow_id: b.flow_id,
+        flow_action: action,
+      };
+      if (action === 'navigate' && b.navigate_screen) {
+        payload.navigate_screen = b.navigate_screen;
+      }
+      return payload;
+    }
   }
 }
 

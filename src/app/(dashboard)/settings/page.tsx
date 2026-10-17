@@ -12,7 +12,10 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { WebhookEndpointsManager } from '@/components/settings/webhook-endpoints-manager';
+import { WebhookEventsPanel } from '@/components/settings/webhook-events-panel';
 import { TemplateManager } from '@/components/settings/template-manager';
+import { FormsManager } from '@/components/settings/forms/forms-manager';
 import { QuickRepliesManager } from '@/components/settings/quick-replies-manager';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
@@ -75,7 +78,10 @@ function SettingsPageInner() {
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
+    webhooks: <WebhookEndpointsManager />,
+    'webhook-events': <WebhookEventsPanel />,
     templates: <TemplateManager />,
+    forms: <FormsManager />,
     'quick-replies': <QuickRepliesManager />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,

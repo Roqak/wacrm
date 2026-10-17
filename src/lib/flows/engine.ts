@@ -35,10 +35,12 @@
 import { supabaseAdmin } from "./admin-client";
 import {
   engineSendInteractiveButtons,
+  engineSendInteractiveFlow,
   engineSendInteractiveList,
   engineSendMedia,
   engineSendText,
 } from "./meta-send";
+import { submissionVars } from "@/lib/whatsapp/wa-flows/definition";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
@@ -52,6 +54,7 @@ import {
   type FlowRunRow,
   type ParsedInbound,
   type SendButtonsNodeConfig,
+  type SendFormNodeConfig,
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
@@ -128,6 +131,9 @@ export function matchesKeywordTrigger(
  */
 export function entryTriggerTexts(message: ParsedInbound): string[] {
   if (message.kind === "text") return [message.text];
+  // A form submission carries no customer-typed text; it never starts
+  // a keyword flow.
+  if (message.kind === "form_reply") return [];
   return [...new Set([message.reply_title, message.reply_id])].filter(
     (v): v is string => Boolean(v && v.trim()),
   );
@@ -149,8 +155,24 @@ export function isSuspending(node_type: string): boolean {
   return (
     node_type === "send_buttons" ||
     node_type === "send_list" ||
+    node_type === "send_form" ||
     node_type === "collect_input"
   );
+}
+
+/**
+ * Does a form submission answer the `send_form` node the run is parked
+ * on? The token is authoritative: it names the run that sent the form.
+ * Without one (Meta reports "unused" for some template sends) fall back
+ * to "the same form", which is the best evidence left.
+ */
+export function formReplyMatchesNode(
+  message: Extract<ParsedInbound, { kind: "form_reply" }>,
+  runId: string,
+  cfg: SendFormNodeConfig,
+): boolean {
+  if (message.flow_run_id) return message.flow_run_id === runId;
+  return Boolean(message.meta_flow_id && message.meta_flow_id === cfg.flow_id);
 }
 
 /** Nodes that end the run. */
@@ -460,6 +482,41 @@ async function sendListAndSuspend(
     .update({
       last_prompt_message_id: (msg as { id: string } | null)?.id ?? null,
     })
+    .eq("id", run.id);
+  return { outcome: "advanced", node_key: node.node_key };
+}
+
+async function sendFormAndSuspend(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<{ outcome: "advanced"; node_key: string }> {
+  const cfg = node.config as unknown as SendFormNodeConfig;
+  const { whatsapp_message_id, message_id } = await engineSendInteractiveFlow({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    source: "chatbot",
+    flowRunId: run.id,
+    payload: {
+      kind: "flow",
+      body: interpolateVars(cfg.text, run.vars),
+      header: cfg.header_text || undefined,
+      footer: cfg.footer_text || undefined,
+      flow_id: cfg.flow_id,
+      flow_name: cfg.flow_name,
+      cta: cfg.cta,
+      screen: cfg.screen || undefined,
+    },
+  });
+  await logEvent(db, run.id, "message_sent", node.node_key, {
+    node_type: "send_form",
+    whatsapp_message_id,
+  });
+  await db
+    .from("flow_runs")
+    .update({ last_prompt_message_id: message_id })
     .eq("id", run.id);
   return { outcome: "advanced", node_key: node.node_key };
 }
@@ -801,6 +858,30 @@ async function advanceFromNodeKey(
       }
       return { outcome: "advanced" };
     }
+    if (node.node_type === "send_form") {
+      try {
+        await sendFormAndSuspend(db, run, node);
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_form_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_form_failed");
+        return { outcome: "completed" };
+      }
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!advanced) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
     if (node.node_type === "handoff") {
       await executeHandoff(db, run, node);
       return { outcome: "handed_off" };
@@ -956,13 +1037,46 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
-  // Two ways a reply can advance:
+  // Three ways a reply can advance:
   //   1. Interactive button/list tap on a send_buttons/send_list node.
   //   2. Text reply on a collect_input node — capture into vars.
+  //   3. Form submission on a send_form node — capture fields into vars.
   //
   // Everything else falls through to the fallback policy below.
   let matched: string | null = null;
-  if (
+  if (message.kind === "form_reply") {
+    const cfg =
+      currentNode.node_type === "send_form"
+        ? (currentNode.config as unknown as SendFormNodeConfig)
+        : null;
+    if (!cfg || !formReplyMatchesNode(message, run.id, cfg)) {
+      // A submission of some OTHER form (an older send, an agent's
+      // manual send) isn't an answer to this run, and reprompting
+      // over it would be noise. Leave it to automations.
+      return { consumed: false, flow_run_id: run.id, outcome: "no_match" };
+    }
+    const captured = submissionVars(message.fields, cfg.var_prefix?.trim() || undefined);
+    const newVars = { ...run.vars, ...captured };
+    const { error: capErr } = await db
+      .from("flow_runs")
+      .update({ vars: newVars, reprompt_count: 0 })
+      .eq("id", run.id);
+    if (capErr) {
+      await logEvent(db, run.id, "error", currentNode.node_key, {
+        reason: "form_capture_failed",
+        detail: capErr.message,
+      });
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    run.vars = newVars;
+    run.reprompt_count = 0;
+    // Keys only — the values can be personal data (same rule as
+    // collect_input, see the reply_received comment above).
+    await logEvent(db, run.id, "node_entered", currentNode.node_key, {
+      captured_keys: Object.keys(captured),
+    });
+    matched = cfg.next_node_key;
+  } else if (
     message.kind === "interactive_reply" &&
     (currentNode.node_type === "send_buttons" ||
       currentNode.node_type === "send_list")
@@ -1047,6 +1161,16 @@ async function handleReplyForActiveRun(
       await sendButtonsAndSuspend(db, run, currentNode);
     } else if (currentNode.node_type === "send_list") {
       await sendListAndSuspend(db, run, currentNode);
+    } else if (currentNode.node_type === "send_form") {
+      // The customer typed instead of opening the form — send it again.
+      try {
+        await sendFormAndSuspend(db, run, currentNode);
+      } catch (err) {
+        await logEvent(db, run.id, "error", currentNode.node_key, {
+          reason: "reprompt_send_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
     } else if (currentNode.node_type === "collect_input") {
       // Customer typed something we couldn't accept (empty after trim,
       // or var_key missing — rare). Re-send the prompt so they try again.

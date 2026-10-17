@@ -31,6 +31,10 @@ export interface AiConfig {
   isActive: boolean
   autoReplyEnabled: boolean
   autoReplyMaxPerConversation: number
+  /** Generate reply suggestions in the inbox without being asked.
+   *  Off by default — it spends the account's provider key on its own,
+   *  which is the same reason `autoReplyEnabled` is opt-in. */
+  suggestionsEnabled: boolean
   /** Where auto-reply hands a conversation off when the model bails: an
    *  agent's `auth.users.id`, or null to leave it unassigned (drop into
    *  the shared queue). */

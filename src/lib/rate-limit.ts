@@ -165,6 +165,10 @@ export const RATE_LIMITS = {
    *  key past the provider's own rate limit. 60/min ≈ three busy agents
    *  drafting flat-out. */
   aiDraftAccount: { limit: 60, windowMs: 60_000 },
+  /** AI form builder ("describe your form"), per user. Each call can
+   *  run up to three long structured generations (first draft + lint
+   *  repairs), so it is tighter than drafts. */
+  aiFormBuilder: { limit: 10, windowMs: 60_000 },
   /** AI auto-reply generation, per account. The per-conversation cap
    *  (`auto_reply_max_per_conversation`) bounds one thread; this bounds
    *  the whole account across threads, so a burst of inbound from many

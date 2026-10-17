@@ -2,7 +2,7 @@
 // Interactive message payload — shared shape + validation.
 //
 // The persisted, round-trippable representation of a WhatsApp
-// interactive message (reply buttons or a list). This is the single
+// interactive message (reply buttons, a list, or a WhatsApp Form). This is the single
 // source of truth used by:
 //   - the inbox composer + automation "send interactive" builders,
 //   - the send-message core + automation engine (send + persist),
@@ -68,9 +68,46 @@ export interface InteractiveListPayload {
   sections: InteractiveListSection[]
 }
 
+/**
+ * A WhatsApp Form (Meta Flow) message: body text plus a CTA button
+ * that opens the form natively in WhatsApp. The submission comes back
+ * on the webhook as an `nfm_reply`.
+ */
+export interface InteractiveFlowPayload {
+  kind: 'flow'
+  body: string
+  header?: string
+  footer?: string
+  /** Meta's flow id. */
+  flow_id: string
+  /** Form name — display only (bubble, previews). */
+  flow_name?: string
+  /** Label of the button that opens the form (≤ 20 chars). */
+  cta: string
+  /**
+   * `navigate` opens `screen` directly; `data_exchange` asks the
+   * form's data endpoint for the first screen. Default `navigate`.
+   */
+  flow_action?: 'navigate' | 'data_exchange'
+  /** Screen to open for `navigate`. Resolved from the form's
+   *  definition at send time when omitted. */
+  screen?: string
+  /** Initial data handed to the opening screen (`navigate` only). */
+  data?: Record<string, unknown>
+  /** Send an unpublished (DRAFT) form — testing only. */
+  mode?: 'draft' | 'published'
+  /**
+   * Opaque correlation id Meta echoes back on submission. Minted by
+   * the sender at send time and persisted with the message; callers
+   * never need to set it.
+   */
+  flow_token?: string
+}
+
 export type InteractiveMessagePayload =
   | InteractiveButtonsPayload
   | InteractiveListPayload
+  | InteractiveFlowPayload
 
 export type InteractiveValidation =
   | { ok: true }
@@ -223,7 +260,42 @@ export function validateInteractivePayload(
     return ok()
   }
 
-  return fail('Interactive message must be reply buttons or a list.')
+  if (p.kind === 'flow') {
+    const flow = p as InteractiveFlowPayload
+    if (typeof flow.flow_id !== 'string' || flow.flow_id.trim() === '') {
+      return fail('Choose a form to send.')
+    }
+    if (typeof flow.cta !== 'string' || flow.cta.trim() === '') {
+      return fail('The form needs a button label.')
+    }
+    if (flow.cta.length > INTERACTIVE_LIMITS.flowCtaMaxLength) {
+      return fail(
+        `Form button label exceeds the ${INTERACTIVE_LIMITS.flowCtaMaxLength}-character limit.`,
+      )
+    }
+    if (
+      flow.flow_action !== undefined &&
+      flow.flow_action !== 'navigate' &&
+      flow.flow_action !== 'data_exchange'
+    ) {
+      return fail('Form action must be "navigate" or "data_exchange".')
+    }
+    if (flow.screen !== undefined && typeof flow.screen !== 'string') {
+      return fail('Form screen must be a string.')
+    }
+    if (
+      flow.data !== undefined &&
+      (flow.data === null || typeof flow.data !== 'object' || Array.isArray(flow.data))
+    ) {
+      return fail('Form data must be an object.')
+    }
+    if (flow.mode !== undefined && flow.mode !== 'draft' && flow.mode !== 'published') {
+      return fail('Form mode must be "draft" or "published".')
+    }
+    return ok()
+  }
+
+  return fail('Interactive message must be reply buttons, a list or a form.')
 }
 
 /**
@@ -235,5 +307,6 @@ export function interactivePayloadPreviewText(
 ): string {
   const body = payload.body?.trim()
   if (body) return body
+  if (payload.kind === 'flow') return '[form]'
   return payload.kind === 'buttons' ? '[buttons]' : '[list]'
 }

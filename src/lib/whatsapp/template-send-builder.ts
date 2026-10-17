@@ -49,6 +49,15 @@ export interface SendTimeParams {
    * override at send time.
    */
   buttonParams?: Record<number, string>;
+  /**
+   * Token for a FLOW (WhatsApp Form) button, echoed back by Meta on the
+   * submission. Omitted → no button component; Meta then reports the
+   * token as "unused" and the webhook correlates by the replied-to
+   * message instead.
+   */
+  flowToken?: string;
+  /** Initial data handed to the form's opening screen. */
+  flowActionData?: Record<string, unknown>;
 }
 
 export type MetaSendComponent =
@@ -56,7 +65,7 @@ export type MetaSendComponent =
   | { type: 'body'; parameters: MetaSendParameter[] }
   | {
       type: 'button';
-      sub_type: 'url' | 'quick_reply' | 'copy_code';
+      sub_type: 'url' | 'quick_reply' | 'copy_code' | 'flow';
       index: string;
       parameters: MetaSendParameter[];
     };
@@ -67,7 +76,11 @@ type MetaSendParameter =
   | { type: 'video'; video: { link?: string; id?: string } }
   | { type: 'document'; document: { link?: string; id?: string } }
   | { type: 'coupon_code'; coupon_code: string }
-  | { type: 'payload'; payload: string };
+  | { type: 'payload'; payload: string }
+  | {
+      type: 'action';
+      action: { flow_token?: string; flow_action_data?: Record<string, unknown> };
+    };
 
 function buildHeaderComponent(
   template: MessageTemplate,
@@ -147,8 +160,11 @@ function buildBodyComponent(
 function buttonNeedsSendParam(
   button: TemplateButton,
   override: string | undefined,
+  params: SendTimeParams,
 ): boolean {
   switch (button.type) {
+    case 'FLOW':
+      return Boolean(params.flowToken || params.flowActionData);
     case 'URL':
       return extractVariableIndices(button.url).length > 0;
     case 'COPY_CODE':
@@ -166,10 +182,24 @@ function buildButtonComponent(
   button: TemplateButton,
   index: number,
   override: string | undefined,
+  params: SendTimeParams,
 ): MetaSendComponent | null {
-  if (!buttonNeedsSendParam(button, override)) return null;
+  if (!buttonNeedsSendParam(button, override, params)) return null;
 
   switch (button.type) {
+    case 'FLOW': {
+      const action: { flow_token?: string; flow_action_data?: Record<string, unknown> } = {};
+      if (params.flowToken) action.flow_token = params.flowToken;
+      if (params.flowActionData && Object.keys(params.flowActionData).length > 0) {
+        action.flow_action_data = params.flowActionData;
+      }
+      return {
+        type: 'button',
+        sub_type: 'flow',
+        index: String(index),
+        parameters: [{ type: 'action', action }],
+      };
+    }
     case 'URL': {
       // Each URL button is its own component with sub_type=url and
       // the button's index in the template's buttons array.
@@ -228,7 +258,7 @@ export function buildSendComponents(
   if (template.buttons?.length) {
     template.buttons.forEach((btn, i) => {
       const override = params.buttonParams?.[i];
-      const component = buildButtonComponent(btn, i, override);
+      const component = buildButtonComponent(btn, i, override, params);
       if (component) out.push(component);
     });
   }

@@ -2,6 +2,7 @@ import { sendTextMessage, sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import {
   engineSendInteractiveButtons,
+  engineSendInteractiveFlow,
   engineSendInteractiveList,
 } from '@/lib/flows/meta-send'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -71,8 +72,8 @@ interface SendInteractiveArgs {
 }
 
 /**
- * Send an interactive (reply-buttons or list) message from the
- * automation engine.
+ * Send an interactive (reply-buttons, list or WhatsApp Form) message
+ * from the automation engine.
  *
  * Delegates to the Flows interactive senders
  * (`engineSendInteractiveButtons` / `engineSendInteractiveList`), which
@@ -86,6 +87,14 @@ export async function engineSendInteractive(
 ): Promise<{ whatsapp_message_id: string }> {
   const { payload, accountId, userId, conversationId, contactId } = args
   const common = { accountId, userId, conversationId, contactId }
+  if (payload.kind === 'flow') {
+    const { whatsapp_message_id } = await engineSendInteractiveFlow({
+      ...common,
+      payload,
+      source: 'automation',
+    })
+    return { whatsapp_message_id }
+  }
   if (payload.kind === 'buttons') {
     return engineSendInteractiveButtons({
       ...common,

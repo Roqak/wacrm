@@ -17,6 +17,7 @@
  */
 
 import {
+  ClipboardList,
   Flag,
   GitFork,
   Inbox,
@@ -46,6 +47,7 @@ export type NodeType =
   | 'send_buttons'
   | 'send_list'
   | 'send_media'
+  | 'send_form'
   | 'collect_input'
   | 'condition'
   | 'set_tag'
@@ -131,6 +133,13 @@ export const NODE_META: Record<
     blurb: 'Sends an image, video, or document',
     category: 'messaging',
   },
+  send_form: {
+    label: 'Send WhatsApp form',
+    icon: ClipboardList,
+    color: 'text-emerald-400',
+    blurb: 'Sends a native form, waits for it',
+    category: 'messaging',
+  },
   collect_input: {
     label: 'Collect input',
     icon: Inbox,
@@ -202,6 +211,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   send_buttons: { l: 0.62, c: 0.16, h: 254 }, // cobalt
   send_list: { l: 0.62, c: 0.15, h: 277 }, // indigo
   send_media: { l: 0.65, c: 0.12, h: 210 }, // sky
+  send_form: { l: 0.64, c: 0.14, h: 150 }, // green — a native form
   collect_input: { l: 0.65, c: 0.1, h: 185 }, // teal — capture
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
@@ -368,6 +378,15 @@ export function summarizeNode(
       return caption
         ? `${label}: ${truncate(name, 30)} · ${truncate(caption, 40)}`
         : `${label}: ${truncate(name, 60)}`;
+    }
+    case 'send_form': {
+      const name = typeof cfg.flow_name === 'string' ? cfg.flow_name : '';
+      const prefix = typeof cfg.var_prefix === 'string' ? cfg.var_prefix : '';
+      if (!name && !(typeof cfg.flow_id === 'string' && cfg.flow_id)) {
+        return t ? t('noForm') : 'No form chosen';
+      }
+      const label = truncate(name || String(cfg.flow_id), 40);
+      return prefix ? `${label} → vars.${prefix}_*` : label;
     }
     case 'collect_input': {
       const prompt = typeof cfg.prompt_text === 'string' ? cfg.prompt_text : '';

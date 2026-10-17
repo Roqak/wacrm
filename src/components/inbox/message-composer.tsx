@@ -47,6 +47,8 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { ReplyQuote } from "./reply-quote";
+import { ReplySuggestions } from "./reply-suggestions";
+import { useAiSuggestionsEnabled } from "@/hooks/use-ai-suggestions-enabled";
 import { useTranslations } from "next-intl";
 import {
   InteractiveBuilder,
@@ -112,6 +114,12 @@ interface MediaDraft {
 interface MessageComposerProps {
   conversationId: string;
   sessionExpired: boolean;
+  /**
+   * Id of the newest customer message when it is the last thing in the
+   * thread, else null. Drives AI reply suggestions — see
+   * `ReplySuggestions` for why it is an id rather than a boolean.
+   */
+  suggestFor?: string | null;
   onSend: (text: string, replyToId?: string) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
   onSendInteractive: (payload: InteractiveMessagePayload, replyToId?: string) => void;
@@ -134,6 +142,7 @@ const OPUS_ENCODER_PATH = "/opus/encoderWorker.min.js";
 export function MessageComposer({
   conversationId,
   sessionExpired,
+  suggestFor = null,
   onSend,
   onSendMedia,
   onSendInteractive,
@@ -252,6 +261,26 @@ export function MessageComposer({
       adjustHeight();
     },
     [adjustHeight]
+  );
+
+  const suggestionsEnabled = useAiSuggestionsEnabled();
+
+  // Load a clicked suggestion into the textarea. Same settle-and-focus
+  // as handleDraft below: grow the box to fit and put the caret at the
+  // end so the agent can edit without another click.
+  const applySuggestion = useCallback(
+    (suggestion: string) => {
+      setText(suggestion);
+      requestAnimationFrame(() => {
+        adjustHeight();
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+    },
+    [adjustHeight],
   );
 
   // Ask the AI assistant for a suggested reply and drop it into the
@@ -537,6 +566,18 @@ export function MessageComposer({
 
   return (
     <div className="border-t border-border bg-card p-3">
+      {/* Suggestions sit above everything else in the composer so they
+          read as "here is what you could say" before the input, not as
+          an afterthought under it. Renders nothing when the account has
+          the feature off, when the agent has started typing, or when
+          there is no customer message waiting. */}
+      <ReplySuggestions
+        conversationId={conversationId}
+        triggerMessageId={sessionExpired ? null : suggestFor}
+        enabled={suggestionsEnabled}
+        composerBusy={text.trim().length > 0 || !!draft}
+        onPick={applySuggestion}
+      />
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote

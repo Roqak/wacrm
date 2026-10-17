@@ -19,6 +19,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
+import {
+  findLocalFlow,
+  mintFlowToken,
+  recordFlowToken,
+  templateFlowButton,
+} from '@/lib/whatsapp/wa-flows/send';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import {
   sanitizePhoneForMeta,
@@ -60,10 +67,14 @@ interface PlannedRecipient {
   recipientRowId: string;
   phone: string;
   params: string[];
+  /** Set when known — ties a WhatsApp Form submission to the contact. */
+  contactId?: string;
 }
 
 export interface BroadcastPlan {
   broadcastId: string;
+  /** Tenancy for WhatsApp Form token bookkeeping. */
+  accountId?: string;
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -226,12 +237,18 @@ export async function createBroadcast(
   const planned: PlannedRecipient[] = createdRows.map(
     (row: { recipient_id: string; contact_id: string }) => {
       const r = byContact.get(row.contact_id)!;
-      return { recipientRowId: row.recipient_id, phone: r.phone, params: r.params };
+      return {
+        recipientRowId: row.recipient_id,
+        phone: r.phone,
+        params: r.params,
+        contactId: r.contactId,
+      };
     }
   );
 
   return {
     broadcastId,
+    accountId,
     templateName,
     templateLanguage: resolvedTemplate.language,
     phoneNumberId: config.phone_number_id,
@@ -259,10 +276,21 @@ export async function deliverBroadcast(
   db: SupabaseClient,
   plan: BroadcastPlan
 ): Promise<void> {
+  // A template with a WhatsApp Form button gets a token per recipient,
+  // so each submission maps back to its contact and form. Broadcast
+  // sends aren't in `messages`, so the webhook's replied-to-message
+  // fallback can't identify the form for them — the token can.
+  const flowButton = plan.accountId ? templateFlowButton(plan.templateRow) : null;
+  const localFlow =
+    flowButton && plan.accountId
+      ? await findLocalFlow(supabaseAdmin(), plan.accountId, flowButton.flow_id)
+      : null;
+
   for (const recipient of plan.planned) {
     const variants = phoneVariants(recipient.phone);
     let sentMessageId: string | null = null;
     let lastError: string | null = null;
+    const flowToken = flowButton ? mintFlowToken() : undefined;
 
     for (const variant of variants) {
       try {
@@ -274,6 +302,9 @@ export async function deliverBroadcast(
           language: plan.templateLanguage,
           template: plan.templateRow ?? undefined,
           params: recipient.params,
+          messageParams: flowToken
+            ? { body: recipient.params, flowToken }
+            : undefined,
         });
         sentMessageId = result.messageId;
         lastError = null;
@@ -284,6 +315,18 @@ export async function deliverBroadcast(
         // Only a "recipient not allowed" error is worth another variant.
         if (!isRecipientNotAllowedError(message)) break;
       }
+    }
+
+    if (sentMessageId && flowToken && flowButton && plan.accountId) {
+      await recordFlowToken(supabaseAdmin(), {
+        token: flowToken,
+        accountId: plan.accountId,
+        flowId: localFlow?.id ?? null,
+        metaFlowId: flowButton.flow_id,
+        contactId: recipient.contactId ?? null,
+        source: 'broadcast',
+        waMessageId: sentMessageId,
+      });
     }
 
     if (sentMessageId) {

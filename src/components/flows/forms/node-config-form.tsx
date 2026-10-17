@@ -48,6 +48,13 @@ import {
 import { cn } from "@/lib/utils";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { slugify, type BuilderNode } from "../shared";
+import { useWhatsAppForms } from "@/components/interactive/flow-form-editor";
+import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
+import {
+  listFieldNames,
+  listScreenIds,
+  submissionVars,
+} from "@/lib/whatsapp/wa-flows/definition";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 
 interface NodeConfigFormProps {
@@ -126,6 +133,18 @@ export function NodeConfigForm({
           allNodes={allNodes}
           currentKey={node.node_key}
           onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "send_form":
+      return (
+        <SendFormForm
+          cfg={cfg as SendFormCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          showAdvanced={showAdvanced}
           t={t}
         />
       );
@@ -1058,6 +1077,175 @@ function SendMediaForm({
         currentKey={currentKey}
         onChange={(v) => onUpdateConfig({ next_node_key: v })}
         label={t("advanceAfterSending")}
+      />
+    </>
+  );
+}
+
+// ------------------------------------------------------------
+// send_form
+// ------------------------------------------------------------
+
+interface SendFormCfg {
+  flow_id?: string;
+  flow_name?: string;
+  text?: string;
+  cta?: string;
+  header_text?: string;
+  footer_text?: string;
+  screen?: string;
+  var_prefix?: string;
+  next_node_key?: string;
+}
+
+function SendFormForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  showAdvanced,
+  t,
+}: {
+  cfg: SendFormCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  showAdvanced: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const { forms, loading } = useWhatsAppForms();
+  const options = forms.filter(
+    (f) => f.status === "PUBLISHED" || f.meta_flow_id === cfg.flow_id,
+  );
+  const selected = forms.find((f) => f.meta_flow_id === cfg.flow_id) ?? null;
+  const prefix = cfg.var_prefix?.trim() || undefined;
+  // Preview the vars a submission will land in, from the form's inputs.
+  const capturedVars = Object.keys(
+    submissionVars(
+      Object.fromEntries(listFieldNames(selected?.flow_json).map((n) => [n, ""])),
+      prefix,
+    ),
+  );
+  const selectClass =
+    "h-9 w-full rounded-md border border-border bg-muted px-2 text-sm text-foreground";
+
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          {t("formLabel")}
+        </label>
+        <select
+          value={cfg.flow_id ?? ""}
+          disabled={loading}
+          onChange={(e) => {
+            const form = forms.find((f) => f.meta_flow_id === e.target.value);
+            onUpdateConfig({
+              flow_id: e.target.value,
+              flow_name: form?.name ?? "",
+              screen: "",
+            });
+          }}
+          className={selectClass}
+        >
+          <option value="">{loading ? "…" : t("formPick")}</option>
+          {options.map((f) => (
+            <option key={f.id} value={f.meta_flow_id}>
+              {f.name}
+              {f.status !== "PUBLISHED" ? ` (${f.status.toLowerCase()})` : ""}
+            </option>
+          ))}
+        </select>
+        {!loading && options.length === 0 && (
+          <p className="mt-1 text-[10px] text-muted-foreground">{t("formNone")}</p>
+        )}
+      </div>
+      <TextRow
+        label={t("formText")}
+        value={cfg.text ?? ""}
+        onChange={(v) => onUpdateConfig({ text: v })}
+        rows={2}
+      />
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <label className="text-xs text-muted-foreground">{t("formCta")}</label>
+          <span className="text-[10px] text-muted-foreground">
+            {(cfg.cta ?? "").length}/{INTERACTIVE_LIMITS.flowCtaMaxLength}
+          </span>
+        </div>
+        <Input
+          value={cfg.cta ?? ""}
+          maxLength={INTERACTIVE_LIMITS.flowCtaMaxLength}
+          onChange={(e) => onUpdateConfig({ cta: e.target.value })}
+          className="bg-muted"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          {t("formVarPrefix")}
+        </label>
+        <Input
+          value={cfg.var_prefix ?? ""}
+          onChange={(e) =>
+            onUpdateConfig({
+              var_prefix: e.target.value.replace(/[^a-zA-Z0-9_]/g, ""),
+            })
+          }
+          placeholder="form"
+          className="bg-muted font-mono text-xs"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {t("formVarPrefixHelp")}{" "}
+          {capturedVars.length > 0 ? (
+            capturedVars.slice(0, 6).map((v) => (
+              <code key={v} className="mr-1 rounded bg-muted px-1">
+                {`{{vars.${v}}}`}
+              </code>
+            ))
+          ) : (
+            <code className="rounded bg-muted px-1">
+              {`{{vars.${prefix ? `${prefix}_` : ""}email}}`}
+            </code>
+          )}
+        </p>
+      </div>
+      {showAdvanced && (
+        <>
+          <TextRow
+            label={t("formHeader")}
+            value={cfg.header_text ?? ""}
+            onChange={(v) => onUpdateConfig({ header_text: v })}
+          />
+          <TextRow
+            label={t("formFooter")}
+            value={cfg.footer_text ?? ""}
+            onChange={(v) => onUpdateConfig({ footer_text: v })}
+          />
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              {t("formScreen")}
+            </label>
+            <select
+              value={cfg.screen ?? ""}
+              onChange={(e) => onUpdateConfig({ screen: e.target.value })}
+              className={selectClass}
+            >
+              <option value="">{t("formScreenDefault")}</option>
+              {listScreenIds(selected?.flow_json).map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advanceAfterSubmit")}
       />
     </>
   );

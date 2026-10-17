@@ -1,11 +1,12 @@
 "use client";
 
-import { List, Reply } from "lucide-react";
+import { ClipboardList, List, Reply } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { InteractiveMessagePayload } from "@/lib/whatsapp/interactive";
 
 /**
- * WhatsApp-style read-only render of an interactive message. Used both
+ * WhatsApp-style read-only render of an interactive message (buttons,
+ * list, or a WhatsApp Form's open-form button). Used both
  * in the builder's live preview and by the inbox message bubble so a
  * sent buttons/list message shows the same way it does on the phone.
  *
@@ -60,6 +61,16 @@ export function InteractivePreview({
             </button>
           ))}
         </div>
+      ) : payload.kind === "flow" ? (
+        <button
+          type="button"
+          disabled
+          title={payload.flow_name ? `Opens form: ${payload.flow_name}` : undefined}
+          className="flex w-full items-center justify-center gap-1.5 border-t border-border py-2 text-sm font-medium text-primary"
+        >
+          <ClipboardList className="h-3.5 w-3.5" />
+          <span className="truncate">{payload.cta || "Open form"}</span>
+        </button>
       ) : (
         <button
           type="button"

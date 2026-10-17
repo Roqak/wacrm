@@ -1,5 +1,10 @@
 # Public API (`/api/v1`)
 
+> Machine-readable contract: **`GET /api/v1/openapi.json`** (OpenAPI 3.1,
+> no auth). This document is the prose mirror — when the two disagree,
+> one of them is a bug. Scopes in the spec are derived from the same
+> constants the routes use, so they cannot silently drift.
+
 The public API lets you drive your wacrm instance from your own
 scripts and automations — send messages, manage contacts, launch
 broadcasts — without going through the dashboard UI.
@@ -50,6 +55,8 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
+| `templates:manage`   | Create, update, and delete templates     |
+| `forms:read`         | List WhatsApp Forms and read submissions |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -160,9 +167,31 @@ Response (201):
 }
 ```
 
+`type: "interactive"` takes an `interactive_payload`: reply buttons
+(`kind: "buttons"`), a list (`kind: "list"`), or a WhatsApp Form
+(`kind: "flow"` — see [WhatsApp Forms](#whatsapp-forms)):
+
+```jsonc
+{
+  "to": "+14155550123",
+  "type": "interactive",
+  "interactive_payload": {
+    "kind": "flow",
+    "body": "Tell us a bit about yourself",
+    "flow_id": "1234567890",      // Meta's id — `meta_flow_id` from GET /api/v1/forms
+    "cta": "Sign up",             // button label, ≤ 20 chars
+    "screen": "DETAILS"           // optional; defaults to the form's first screen
+  }
+}
+```
+
+Interactive messages, forms included, only go out inside the 24-hour
+customer-service window; outside it, send a template whose button opens
+the form.
+
 Domain error codes beyond the table above: `whatsapp_not_configured`
-(400), `meta_error` (502 — the request reached Meta and it rejected the
-send), `template_malformed` (500).
+(400), `meta_error` (422 — the request reached Meta and it rejected the
+send; `message` carries Meta's reason), `template_malformed` (500).
 
 ### `GET /api/v1/contacts`
 
@@ -294,6 +323,7 @@ things happen in your account. **Migration required:** apply
 | `message.received`       | An inbound message arrives from a contact         |
 | `message.status_updated` | A message you sent changed delivery status        |
 | `conversation.created`   | A new conversation is opened for a contact        |
+| `form.submitted`         | A contact submits a WhatsApp Form                 |
 
 ### Managing endpoints
 
@@ -374,10 +404,121 @@ resolve to a public address — requests to `localhost`, private/RFC1918
 ranges, link-local (incl. cloud metadata `169.254.169.254`), and similar
 internal targets are refused at delivery time.
 
+## Templates
+
+Same lifecycle the dashboard's template manager drives: submit to Meta
+for approval, watch the status land, edit / re-submit, delete. All under
+scope `templates:manage`.
+
+A template body follows the dashboard's shape (see the New Template
+form): `name`, `category` (`Utility`/`Marketing` — AUTHENTICATION is
+refused with a pointer to Meta WhatsApp Manager), `language`
+(e.g. `en_US`), `body_text` with `{{1}}`-style variables, optional
+`footer_text`, optional header (`header_type`: `none` / `text` /
+`image` / `video` / `document` with `header_content` or
+`header_media_url`), optional `buttons` (URL / PHONE_NUMBER /
+QUICK_REPLY / COPY_CODE / FLOW — a FLOW button takes `flow_id`, the
+form's Meta id, and `navigate_screen`; the form must be published), and
+`sample_values` for the variables.
+
+- `GET /api/v1/templates` — list, paginated; `?search=` (name) and
+  `?status=` (one of Meta's status words, e.g. `APPROVED`) filters.
+- `POST /api/v1/templates` — create + submit. `201 { "data": { …"status":"PENDING" } }`.
+  A Meta rejection stores the row as DRAFT with the error and returns
+  `429` (Meta's 100-creates-per-hour rate limit) or `422` with the
+  actionable message.
+- `GET /api/v1/templates/{id}` — read one (status included).
+- `PATCH /api/v1/templates/{id}` — `APPROVED` / `REJECTED` / `PAUSED`
+  rows: full body replace, re-submitted to Meta, status → `PENDING`.
+- `DELETE /api/v1/templates/{id}` — deletes on Meta (by name + hsm_id
+  language variant) and drops the local row.
+
+Status lifecycle note: Meta review is asynchronous. `PENDING` may take
+hours to resolve; the dashboard's webhook panel will show the status
+webhook from Meta, and GET reflects it after that arrives. Template
+body text can't be changed without a re-review — that's Meta policy,
+not an implementation detail.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/templates \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "order_update",
+    "category": "Utility",
+    "language": "en_US",
+    "body_text": "Hi {{1}}! Your order {{2}} ships today.",
+    "sample_values": { "body": ["Jane", "A123"] }
+  }'
+# → 201 { "data": { "id": "…", "name": "order_update", "status": "PENDING", … } }
+```
+
+## WhatsApp Forms
+
+WhatsApp Forms are Meta WhatsApp Flows: native multi-screen forms that
+open inside the chat. Create or sync them in **Settings → WhatsApp
+Forms** (needs migration `050_whatsapp_flows.sql`), then send them from
+the inbox, automations, chatbot flows, template buttons — or this API.
+Scope `forms:read` covers reading them:
+
+- `GET /api/v1/forms` — list, paginated; `?status=` (`DRAFT`,
+  `PUBLISHED`, `DEPRECATED`, `BLOCKED`, `THROTTLED`). Send with the
+  form's `meta_flow_id`.
+- `GET /api/v1/forms/{id}` — one form, with its Flow JSON `definition`.
+- `GET /api/v1/forms/{id}/responses` — submissions, newest first,
+  paginated; `?contact_id=` narrows to one contact.
+
+Each submission is `{ id, form_id, meta_flow_id, contact_id,
+conversation_id, whatsapp_message_id, response, created_at }`, where
+`response` holds the answers keyed by the form's input names.
+
+For a push feed, subscribe a webhook to `form.submitted`. Its `data`:
+
+```json
+{
+  "conversation_id": "…",
+  "contact_id": "…",
+  "whatsapp_message_id": "wamid.…",
+  "form_id": "…",
+  "meta_flow_id": "1234567890",
+  "form_name": "Sign up",
+  "response": { "name": "Ada", "email": "ada@example.com" }
+}
+```
+
+### Data endpoint
+
+Forms that load data or validate answers while the customer fills them
+in call a *data endpoint*. wacrm hosts it at
+`/api/whatsapp/flows/endpoint/{account_id}`: generate the encryption
+key in Settings → WhatsApp Forms, point the form at the endpoint, and
+set a **forward URL**. wacrm verifies Meta's signature, decrypts each
+request, and POSTs it to your forward URL as plain JSON:
+
+```json
+{
+  "version": "3.0",
+  "action": "data_exchange",
+  "screen": "DETAILS",
+  "data": { "postcode": "SW1A 1AA" },
+  "flow_token": "wacrm_…",
+  "form": { "id": "…", "meta_flow_id": "1234567890", "name": "Sign up" },
+  "contact": { "id": "…", "name": "Ada", "phone": "+44…" },
+  "conversation_id": "…"
+}
+```
+
+It carries an `X-Wacrm-Signature` header (same scheme as outbound
+webhooks, keyed with the forward secret shown once when you save the
+URL). Answer within ~7 seconds with the JSON Meta expects, e.g.
+`{ "screen": "CONFIRM", "data": { … } }`; wacrm encrypts it back to
+Meta. Health checks (`ping`) and client error notifications are
+answered for you.
+
 ## Roadmap
 
 The public API now covers messaging, contacts, conversations,
-broadcasts, and outbound webhooks — the full scope of
+broadcasts, outbound webhooks, template management, and WhatsApp Forms — see
 [#245](https://github.com/ArnasDon/wacrm/issues/245). Future ideas
-(deals/pipelines, templates, flows, a delivery queue for webhooks) are
+(deals/pipelines, flows, a delivery queue for webhooks) are
 not yet scheduled.

@@ -6,10 +6,9 @@ import type {
   ConditionStepConfig,
   KeywordMatchTriggerConfig,
   InteractiveReplyTriggerConfig,
+  FormSubmittedTriggerConfig,
   TagTriggerConfig,
   SendMessageStepConfig,
-  SendButtonsStepConfig,
-  SendListStepConfig,
   SendTemplateStepConfig,
   SendWebhookStepConfig,
   TagStepConfig,
@@ -22,7 +21,10 @@ import { supabaseAdmin } from './admin-client'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
 import { MAX_TAG_CHAIN_DEPTH, getTagChainDepth } from '@/lib/contacts/tag-chain'
 import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
-import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
+import {
+  validateInteractivePayload,
+  type InteractiveMessagePayload,
+} from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
 // ------------------------------------------------------------
@@ -42,6 +44,8 @@ export interface AutomationContext {
   agent_id?: string
   /** Button / list-row id the customer tapped, for interactive_reply. */
   interactive_reply_id?: string
+  /** Local `whatsapp_flows.id` of a submitted form, for form_submitted. */
+  flow_id?: string
 }
 
 export interface DispatchInput {
@@ -376,8 +380,9 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
     }
 
     case 'send_buttons':
-    case 'send_list': {
-      const payload = step.step_config as SendButtonsStepConfig | SendListStepConfig
+    case 'send_list':
+    case 'send_form': {
+      const payload = step.step_config as unknown as InteractiveMessagePayload
       if (!args.contactId) throw new Error(`${step.step_type} needs a contact`)
       // Validate against Meta's limits before the network call so a bad
       // payload surfaces as a clear failed-step detail rather than a raw
@@ -722,6 +727,15 @@ export function triggerMatches(automation: Automation, ctx: AutomationContext | 
       return false
     }
     return cfg.reply_ids.includes(replyId)
+  }
+
+  // Any form, or only the listed ones. A submission from a form that
+  // isn't in the local catalog (no flow_id) matches only "any form".
+  if (automation.trigger_type === 'form_submitted') {
+    const cfg = automation.trigger_config as FormSubmittedTriggerConfig
+    const ids = Array.isArray(cfg?.flow_ids) ? cfg.flow_ids : []
+    if (ids.length === 0) return true
+    return Boolean(ctx?.flow_id && ids.includes(ctx.flow_id))
   }
 
   if (automation.trigger_type === 'tag_added') {

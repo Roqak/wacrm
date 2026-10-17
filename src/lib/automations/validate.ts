@@ -60,12 +60,15 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       }
       break
     case 'send_buttons':
-    case 'send_list': {
+    case 'send_list':
+    case 'send_form': {
       // The whole step_config IS the interactive payload; validate it
       // against Meta's limits (same check the engine runs before send).
       const result = validateInteractivePayload(c)
       if (!result.ok) {
         issues.push({ path: `${path}.interactive`, message: result.error })
+      } else if (step.step_type === 'send_form' && c.kind !== 'flow') {
+        issues.push({ path: `${path}.interactive`, message: 'a form step must send a form' })
       }
       break
     }
@@ -189,6 +192,16 @@ export function validateTriggerForActivation(
   } else if (triggerType === 'tag_added') {
     if (!nonEmpty(cfg.tag_id)) {
       issues.push({ path: 'trigger.tag_id', message: 'tag is required' })
+    }
+  } else if (triggerType === 'form_submitted') {
+    // flow_ids is optional — empty means "any form".
+    const ids = cfg.flow_ids
+    if (ids !== undefined && ids !== null) {
+      if (!Array.isArray(ids)) {
+        issues.push({ path: 'trigger.flow_ids', message: 'forms must be a list' })
+      } else if (ids.some((v) => typeof v !== 'string' || v.trim() === '')) {
+        issues.push({ path: 'trigger.flow_ids', message: 'form ids cannot be empty' })
+      }
     }
   } else if (triggerType === 'interactive_reply') {
     const ids = cfg.reply_ids

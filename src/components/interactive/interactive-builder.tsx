@@ -12,10 +12,20 @@ import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
 import {
   validateInteractivePayload,
   type InteractiveButtonsPayload,
+  type InteractiveFlowPayload,
   type InteractiveListPayload,
   type InteractiveMessagePayload,
 } from "@/lib/whatsapp/interactive";
 import { InteractivePreview } from "./interactive-preview";
+import { FlowFormEditor } from "./flow-form-editor";
+
+type InteractiveKind = InteractiveMessagePayload["kind"];
+const ALL_KINDS: InteractiveKind[] = ["buttons", "list", "flow"];
+const KIND_LABELS: Record<InteractiveKind, string> = {
+  buttons: "Reply buttons",
+  list: "List",
+  flow: "Form",
+};
 
 // ------------------------------------------------------------
 // Blank payload factories — used to seed a fresh builder and to
@@ -43,6 +53,15 @@ export function blankButtonsPayload(): InteractiveButtonsPayload {
   };
 }
 
+export function blankFlowPayload(): InteractiveFlowPayload {
+  return {
+    kind: "flow",
+    body: "",
+    flow_id: "",
+    cta: "Open form",
+  };
+}
+
 export function blankListPayload(): InteractiveListPayload {
   return {
     kind: "list",
@@ -57,11 +76,16 @@ interface InteractiveBuilderProps {
   onChange: (payload: InteractiveMessagePayload) => void;
   /** Show the live WhatsApp-style preview beside the form. Default true. */
   showPreview?: boolean;
+  /**
+   * Which message kinds the toggle offers. Default: all three. An
+   * automation "send form" step pins it to `["flow"]`.
+   */
+  kinds?: InteractiveKind[];
 }
 
 /**
- * Controlled builder for a WhatsApp interactive message (reply buttons
- * or list). Enforces Meta's char limits inline (maxLength + counters)
+ * Controlled builder for a WhatsApp interactive message (reply buttons,
+ * list, or a WhatsApp Form). Enforces Meta's char limits inline (maxLength + counters)
  * and surfaces a single validation error via `validateInteractivePayload`
  * — the same check the server runs before sending. Shared by the inbox
  * composer, the automation Send node, and the quick-replies manager.
@@ -70,6 +94,7 @@ export function InteractiveBuilder({
   value,
   onChange,
   showPreview = true,
+  kinds = ALL_KINDS,
 }: InteractiveBuilderProps) {
   const [advanced, setAdvanced] = useState(false);
   const validation = validateInteractivePayload(value);
@@ -77,13 +102,15 @@ export function InteractiveBuilder({
   const setField = (patch: Partial<InteractiveMessagePayload>) =>
     onChange({ ...value, ...patch } as InteractiveMessagePayload);
 
-  const switchKind = (kind: "buttons" | "list") => {
+  const switchKind = (kind: InteractiveKind) => {
     if (kind === value.kind) return;
     const shared = { body: value.body, header: value.header, footer: value.footer };
     onChange(
       kind === "buttons"
         ? { ...blankButtonsPayload(), ...shared }
-        : { ...blankListPayload(), ...shared },
+        : kind === "list"
+          ? { ...blankListPayload(), ...shared }
+          : { ...blankFlowPayload(), ...shared },
     );
   };
 
@@ -99,18 +126,18 @@ export function InteractiveBuilder({
       <div className="flex flex-col gap-4 @2xl:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           {/* Kind toggle */}
-          <div className="flex gap-2">
-            <KindButton
-              active={value.kind === "buttons"}
-              label="Reply buttons"
-              onClick={() => switchKind("buttons")}
-            />
-            <KindButton
-              active={value.kind === "list"}
-              label="List"
-              onClick={() => switchKind("list")}
-            />
-          </div>
+          {kinds.length > 1 && (
+            <div className="flex gap-2">
+              {kinds.map((kind) => (
+                <KindButton
+                  key={kind}
+                  active={value.kind === kind}
+                  label={KIND_LABELS[kind]}
+                  onClick={() => switchKind(kind)}
+                />
+              ))}
+            </div>
+          )}
 
           <Field label="Body" counter={`${value.body.length}/${INTERACTIVE_LIMITS.bodyMaxLength}`}>
             <Textarea
@@ -149,8 +176,10 @@ export function InteractiveBuilder({
 
           {value.kind === "buttons" ? (
             <ButtonsEditor value={value} onChange={onChange} advanced={advanced} />
-          ) : (
+          ) : value.kind === "list" ? (
             <ListEditor value={value} onChange={onChange} advanced={advanced} />
+          ) : (
+            <FlowFormEditor value={value} onChange={onChange} advanced={advanced} />
           )}
 
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -160,7 +189,7 @@ export function InteractiveBuilder({
               onChange={(e) => setAdvanced(e.target.checked)}
               className="h-3.5 w-3.5 accent-primary"
             />
-            Show reply IDs (advanced)
+            {value.kind === "flow" ? "Show advanced options" : "Show reply IDs (advanced)"}
           </label>
 
           {!validation.ok && (
